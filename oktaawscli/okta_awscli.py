@@ -106,7 +106,6 @@ def main(okta_profile, profile, verbose, version,
          debug, force, export, cache, awscli_args, token, reset):
     """ Authenticate to awscli using Okta """
     if version:
-        print("This is the new version!!!!!")
         print(__version__)
         exit(0)
     # Set up logging
