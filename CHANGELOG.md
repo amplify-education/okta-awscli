@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.8] 2024-05-02
+### Changed
+- Log exception when encountering unknown ClientError error while listing AWS account aliases.
+
 ## [0.4.5] 2023-03-10
 ### Changed
 - Added handling of Okta authentication status for `MFA_ENROLL` and `LOCKED_OUT`

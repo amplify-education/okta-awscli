@@ -347,6 +347,10 @@ of roles assigned to you."""
                     role_arn,
                     exc_info=self.debug,
                 )
+            else:
+                self.logger.exception(
+                    "Unknown Error. Unable to get account alias for role %s", role_arn
+                )
             return "unknown"
 
     @staticmethod
