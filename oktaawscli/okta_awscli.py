@@ -166,7 +166,7 @@ def console_output(access_key_id, secret_access_key, session_token, verbose):
 Skips STS credentials validation.",
 )
 @click.option(
-    "-r", "--reset", is_flag=True, help="Resets default values in ~/.okta-aws"
+    "--reset", is_flag=True, help="Resets default values in ~/.okta-aws"
 )
 @click.option(
     "-e",
