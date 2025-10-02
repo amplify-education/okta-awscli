@@ -244,7 +244,7 @@ class OktaAuth:
             raw_resp.raise_for_status()
         except HTTPError as e:
             if e.response is not None and e.response.status_code == 403 and "Invalid session" in e.response.text:
-                message = ("Okta session invalidated. Please delete the following files and "
+                message = ("Okta session invalidated. Please delete the following directories and "
                            "try again: ~/.cache, ~/.aws/credentials, and ~/.okta-token")
                 self.logger.error(message)
                 sys.exit(1)
