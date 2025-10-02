@@ -6,6 +6,7 @@ import time
 import json
 from datetime import datetime
 import requests
+from requests.exceptions import HTTPError
 
 from bs4 import BeautifulSoup as bs
 
@@ -234,12 +235,21 @@ class OktaAuth:
 
     def get_apps(self, session_id):
         """Gets apps for the user"""
-        sid = "sid=%s" % session_id
-        headers = {"Cookie": sid}
-        resp = requests.get(
-            self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
-        ).json()
-        print(resp)
+        try:
+            sid = "sid=%s" % session_id
+            headers = {"Cookie": sid}
+            raw_resp = requests.get(
+                self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
+            )
+            print(raw_resp.text) # DEBUG!
+            raw_resp.raise_for_status()
+        except HTTPError as e:
+            if raw_resp.status_code == 403 and "Invalid session" in raw_resp.text:
+                message = "Okta session revoked. Please delete the following files and try again: ~/.cache, ~/.aws/credentials, and ~/.okta-token"
+                self.logger.error(message)
+                print(message)
+                raise e
+        resp = raw_resp.json()
         aws_apps = []
         for app in resp:
             if app["appName"] == "amazon_aws":
