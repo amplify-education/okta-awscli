@@ -249,7 +249,7 @@ class OktaAuth:
                            "try again: ~/.cache, ~/.aws/credentials, and ~/.okta-token")
                 self.logger.error(message)
                 print(message)
-                raise e
+                sys.exit(1)
         resp = raw_resp.json()
         aws_apps = []
         for app in resp:
