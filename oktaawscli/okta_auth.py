@@ -239,6 +239,7 @@ class OktaAuth:
         resp = requests.get(
             self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
         ).json()
+        print(resp)
         aws_apps = []
         for app in resp:
             if app["appName"] == "amazon_aws":
