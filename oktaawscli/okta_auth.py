@@ -250,6 +250,7 @@ class OktaAuth:
                 sys.exit(1)
             else:
                 raise e
+
         resp = raw_resp.json()
         aws_apps = []
         for app in resp:
