@@ -247,6 +247,7 @@ class OktaAuth:
                 message = "Okta session invalidated. Refreshing token now..."
                 self.logger.error(message)
                 os.system("rm -rf ~/.okta-token")
+                sys.exit(1)
             else:
                 raise e
 
