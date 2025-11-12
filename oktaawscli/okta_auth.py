@@ -243,13 +243,7 @@ class OktaAuth:
             )
             raw_resp.raise_for_status()
         except HTTPError as e:
-            if e.response is not None and e.response.status_code == 403 and "Invalid session" in e.response.text:
-                message = "Okta session invalidated. Refreshing token now..."
-                self.logger.error(message)
-                os.system("rm -rf ~/.okta-token")
-                sys.exit(1)
-            else:
-                raise e
+            raise e
 
         resp = raw_resp.json()
         aws_apps = []
@@ -295,7 +289,13 @@ class OktaAuth:
     def get_assertion(self):
         """Main method to get SAML assertion from Okta"""
         session_id = self.primary_auth()
-        app_name, app_link = self.get_apps(session_id)
+        try:
+            app_name, app_link = self.get_apps(session_id)
+        except HTTPError as e:
+            if e.response is not None and e.response.status_code == 403 and "Invalid session" in e.response.text:
+                message = "Okta session invalidated. Refreshing token now..."
+                self.logger.error(message)
+                os.system("rm -rf ~/.okta-token")
         sid = "sid=%s" % session_id
         headers = {"Cookie": sid}
         resp = requests.get(app_link, headers=headers)
