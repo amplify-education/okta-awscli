@@ -54,16 +54,15 @@ def get_credentials(
         )
         _, assertion = okta.get_assertion()
     except HTTPError as e:
-        if e.response is not None and e.response.status_code == 403 and "Invalid session" in e.response.text:
-            message = "Okta session invalidated. Refreshing token now..."
-            logger.error(message)
-            os.system("rm ~/.okta-token")
-            okta = OktaAuth(
-                okta_profile, verbose, logger, totp_token, okta_auth_config, debug=debug
-            )
-            _, assertion = okta.get_assertion()
-        else:
+        if e.response is None or e.response.status_code != 403 or "Invalid session" not in e.response.text:
             raise e
+        message = "Okta session invalidated. Refreshing token now..."
+        logger.error(message)
+        os.system("rm ~/.okta-token")
+        okta = OktaAuth(
+            okta_profile, verbose, logger, totp_token, okta_auth_config, debug=debug
+        )
+        _, assertion = okta.get_assertion()
 
     role = aws_auth.choose_aws_role(assertion)
     role_arn, principal_arn, alias = role
