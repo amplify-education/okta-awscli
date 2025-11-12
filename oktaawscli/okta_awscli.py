@@ -9,6 +9,8 @@ from oktaawscli.okta_auth import OktaAuth
 from oktaawscli.okta_auth_config import OktaAuthConfig
 from oktaawscli.aws_auth import AwsAuth
 
+from requests.exceptions import HTTPError
+
 
 def get_credentials(
     okta_profile,
@@ -46,11 +48,23 @@ def get_credentials(
             print("Copying AWS profile creds to default")
         exit(0)
 
-    okta = OktaAuth(
-        okta_profile, verbose, logger, totp_token, okta_auth_config, debug=debug
-    )
+    try:
+        okta = OktaAuth(
+            okta_profile, verbose, logger, totp_token, okta_auth_config, debug=debug
+        )
+        _, assertion = okta.get_assertion()
+    except HTTPError as e:
+        if e.response is not None and e.response.status_code == 403 and "Invalid session" in e.response.text:
+            message = "Okta session invalidated. Refreshing token now..."
+            logger.error(message)
+            os.system("rm -rf ~/.okta-token")
+            okta = OktaAuth(
+                okta_profile, verbose, logger, totp_token, okta_auth_config, debug=debug
+            )
+            _, assertion = okta.get_assertion()
+        else:
+            raise e
 
-    _, assertion = okta.get_assertion()
     role = aws_auth.choose_aws_role(assertion)
     role_arn, principal_arn, alias = role
 
