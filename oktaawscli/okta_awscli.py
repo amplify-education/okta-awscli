@@ -57,7 +57,7 @@ def get_credentials(
         if e.response is not None and e.response.status_code == 403 and "Invalid session" in e.response.text:
             message = "Okta session invalidated. Refreshing token now..."
             logger.error(message)
-            os.system("rm -rf ~/.okta-token")
+            os.system("rm ~/.okta-token")
             okta = OktaAuth(
                 okta_profile, verbose, logger, totp_token, okta_auth_config, debug=debug
             )
