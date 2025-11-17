@@ -6,7 +6,6 @@ import time
 import json
 from datetime import datetime
 import requests
-from requests.exceptions import HTTPError
 
 from bs4 import BeautifulSoup as bs
 
@@ -42,7 +41,9 @@ class OktaAuth:
         # check if token is valid
         session_id = self.get_cached_session_id()
         if session_id is not None:
-            return session_id
+            # if there's no remote-local desync, return the cached token
+            if self.check_for_desync(session_id) is False:
+                return session_id
         auth_data = {
             "username": self.okta_auth_config.username_for(self.okta_profile),
             "password": self.okta_auth_config.password_for(self.okta_profile),
@@ -233,24 +234,32 @@ class OktaAuth:
             return session_info.get("session_id")
         return None
 
-    def get_apps(self, session_id):
-        """Gets apps for the user"""
+    def check_for_desync(self, session_id):
+        """Returns True if there's a desync between the local and remote token state, False otherwise"""
         try:
             sid = "sid=%s" % session_id
             headers = {"Cookie": sid}
             raw_resp = requests.get(
-                self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
+                self.https_base_url + "/api/v1/users/me", headers=headers
             )
             raw_resp.raise_for_status()
-        except HTTPError as e:
-            if e.response is not None and e.response.status_code == 403 and "Invalid session" in e.response.text:
-                message = "Okta session invalidated. Please delete ~/.okta-token and try again."
-                self.logger.error(message)
-                sys.exit(1)
-            else:
+            return False
+        except requests.HTTPError as e:
+            if e.response is None or e.response.status_code != 403 or "Invalid session" not in e.response.text:
                 raise e
+            message = "Okta session invalidated. Refreshing token now..."
+            self.logger.error(message)
+            return True
 
-        resp = raw_resp.json()
+
+    def get_apps(self, session_id):
+        """Gets apps for the user"""
+        sid = "sid=%s" % session_id
+        headers = {"Cookie": sid}
+        resp = requests.get(
+            self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
+        ).json()
+
         aws_apps = []
         for app in resp:
             if app["appName"] == "amazon_aws":
