@@ -256,12 +256,10 @@ class OktaAuth:
         """Gets apps for the user"""
         sid = "sid=%s" % session_id
         headers = {"Cookie": sid}
-        raw_resp = requests.get(
+        resp = requests.get(
             self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
-        )
-        raw_resp.raise_for_status()
+        ).json()
 
-        resp = raw_resp.json()
         aws_apps = []
         for app in resp:
             if app["appName"] == "amazon_aws":
