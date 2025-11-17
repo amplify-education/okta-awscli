@@ -41,7 +41,9 @@ class OktaAuth:
         # check if token is valid
         session_id = self.get_cached_session_id()
         if session_id is not None:
-            return session_id
+            # if there's no remote-local desync, return the cached token
+            if self.check_for_desync(session_id) is False:
+                return session_id
         auth_data = {
             "username": self.okta_auth_config.username_for(self.okta_profile),
             "password": self.okta_auth_config.password_for(self.okta_profile),
@@ -231,6 +233,24 @@ class OktaAuth:
             self.logger.info("Using cached Okta session id from ~/.okta-token")
             return session_info.get("session_id")
         return None
+
+    def check_for_desync(self, session_id):
+        """Returns True if there's a desync between the local and remote token state, False otherwise"""
+        try:
+            sid = "sid=%s" % session_id
+            headers = {"Cookie": sid}
+            raw_resp = requests.get(
+                self.https_base_url + "/api/v1/users/me", headers=headers
+            )
+            raw_resp.raise_for_status()
+            return False
+        except requests.HTTPError as e:
+            if e.response is None or e.response.status_code != 403 or "Invalid session" not in e.response.text:
+                raise e
+            message = "Okta session invalidated. Refreshing token now..."
+            self.logger.error(message)
+            return True
+
 
     def get_apps(self, session_id):
         """Gets apps for the user"""
