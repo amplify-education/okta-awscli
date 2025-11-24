@@ -50,7 +50,7 @@ class OktaAuth:
             "username": self.okta_auth_config.username_for(self.okta_profile),
             "password": self.okta_auth_config.password_for(self.okta_profile),
         }
-        # insert action-packed documentation link here!
+        # https://developer.okta.com/docs/reference/api/authn/
         resp = requests.post(self.https_base_url + "/api/v1/authn", json=auth_data)
         resp_json = resp.json()
         if "status" in resp_json:
@@ -193,7 +193,7 @@ class OktaAuth:
     def get_session(self, session_token):
         """Gets a session cookie from a session token"""
         data = {"sessionToken": session_token}
-        # insert action-packed documentation link here!
+        # https://developer.okta.com/docs/guides/ie-limitations/main/#sessions-apis
         resp = requests.post(self.https_base_url + "/api/v1/sessions", json=data).json()
         self.cache_session_id(resp["id"], resp["expiresAt"])
         return resp["id"]
@@ -243,7 +243,7 @@ class OktaAuth:
         try:
             sid = "sid=%s" % session_id
             headers = {"Cookie": sid}
-            # insert action-packed documentation link here!
+            # https://developer.okta.com/docs/api/openapi/okta-management/management/tag/User/#tag/User/operation/getUser
             raw_resp = requests.get(
                 self.https_base_url + "/api/v1/users/me", headers=headers
             )
@@ -261,7 +261,7 @@ class OktaAuth:
         """Gets apps for the user"""
         sid = "sid=%s" % session_id
         headers = {"Cookie": sid}
-        # insert action-packed documentation link here!
+        # https://developer.okta.com/docs/api/openapi/okta-management/management/tag/UserResources/#tag/UserResources/operation/listAppLinks
         resp = requests.get(
             self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
         ).json()
