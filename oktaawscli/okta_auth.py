@@ -44,6 +44,8 @@ class OktaAuth:
             # if there's no remote-local desync, return the cached token
             if self.check_for_desync(session_id) is False:
                 return session_id
+            else:
+                self.logger.warning("Current Okta session was invalidated. Refreshing token now...")
         auth_data = {
             "username": self.okta_auth_config.username_for(self.okta_profile),
             "password": self.okta_auth_config.password_for(self.okta_profile),
