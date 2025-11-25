@@ -9,7 +9,6 @@ from oktaawscli.okta_auth import OktaAuth
 from oktaawscli.okta_auth_config import OktaAuthConfig
 from oktaawscli.aws_auth import AwsAuth
 
-
 def get_credentials(
     okta_profile,
     profile,
@@ -49,7 +48,6 @@ def get_credentials(
     okta = OktaAuth(
         okta_profile, verbose, logger, totp_token, okta_auth_config, debug=debug
     )
-
     _, assertion = okta.get_assertion()
     role = aws_auth.choose_aws_role(assertion)
     role_arn, principal_arn, alias = role
