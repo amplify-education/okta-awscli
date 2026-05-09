@@ -147,14 +147,17 @@ class TestAtomicWrite(unittest.TestCase):
         self.assertEqual(leftovers, [])
 
 
-class TestWriteStsTokenLocking(unittest.TestCase):
-    """`AwsAuth.write_sts_token` acquires a lock on the credentials file."""
+class _HomeIsolatedTestCase(unittest.TestCase):
+    """Base class for tests that need an isolated $HOME pointing at a tempdir.
+
+    Subclasses must call `super().setUp()` and `super().tearDown()` if they
+    override either method. The tempdir path is available as `self.tempdir`.
+    """
 
     def setUp(self):
         self.tempdir = tempfile.mkdtemp()
         self._real_home = os.environ.get("HOME")
         os.environ["HOME"] = self.tempdir
-        os.makedirs(os.path.join(self.tempdir, ".aws"))
 
     def tearDown(self):
         if self._real_home is not None:
@@ -162,6 +165,14 @@ class TestWriteStsTokenLocking(unittest.TestCase):
         else:
             os.environ.pop("HOME", None)
         shutil.rmtree(self.tempdir)
+
+
+class TestWriteStsTokenLocking(_HomeIsolatedTestCase):
+    """`AwsAuth.write_sts_token` acquires a lock on the credentials file."""
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.tempdir, ".aws"))
 
     def _make_auth(self):
         import logging
@@ -215,13 +226,11 @@ class TestWriteStsTokenLocking(unittest.TestCase):
         self.assertEqual(config.get("profile_1", "aws_access_key_id"), "AKIA_TEST")
 
 
-class TestCopyToDefaultLocking(unittest.TestCase):
+class TestCopyToDefaultLocking(_HomeIsolatedTestCase):
     """`AwsAuth.copy_to_default` acquires a lock on the credentials file."""
 
     def setUp(self):
-        self.tempdir = tempfile.mkdtemp()
-        self._real_home = os.environ.get("HOME")
-        os.environ["HOME"] = self.tempdir
+        super().setUp()
         os.makedirs(os.path.join(self.tempdir, ".aws"))
         # Pre-populate a profile so copy_to_default has something to copy
         creds_path = os.path.join(self.tempdir, ".aws", "credentials")
@@ -235,13 +244,6 @@ class TestCopyToDefaultLocking(unittest.TestCase):
                 "aws_session_token = session_SRC\n"
                 "aws_security_token = session_SRC\n"
             )
-
-    def tearDown(self):
-        if self._real_home is not None:
-            os.environ["HOME"] = self._real_home
-        else:
-            os.environ.pop("HOME", None)
-        shutil.rmtree(self.tempdir)
 
     def _make_auth(self):
         import logging
@@ -294,16 +296,14 @@ class TestCopyToDefaultLocking(unittest.TestCase):
         self.assertEqual(config.get("default", "aws_security_token"), "session_SRC")
 
 
-class TestGetRoleInfoLocking(unittest.TestCase):
+class TestGetRoleInfoLocking(_HomeIsolatedTestCase):
     """`AwsAuth.__get_role_info` acquires a lock on the okta-alias-info file."""
 
     def setUp(self):
         import json
         from datetime import date
 
-        self.tempdir = tempfile.mkdtemp()
-        self._real_home = os.environ.get("HOME")
-        os.environ["HOME"] = self.tempdir
+        super().setUp()
         os.makedirs(os.path.join(self.tempdir, ".aws"))
 
         # Pre-populate fresh cached aliases so the AWS-call branch is skipped.
@@ -324,13 +324,6 @@ class TestGetRoleInfoLocking(unittest.TestCase):
                 default=str,
             )
         self.info_path = info_path
-
-    def tearDown(self):
-        if self._real_home is not None:
-            os.environ["HOME"] = self._real_home
-        else:
-            os.environ.pop("HOME", None)
-        shutil.rmtree(self.tempdir)
 
     def test_acquires_lock_on_alias_info_file(self):
         from collections import namedtuple
@@ -432,25 +425,16 @@ class TestGetRoleInfoLocking(unittest.TestCase):
         )
 
 
-class TestSaveConfigValueMerge(unittest.TestCase):
+class TestSaveConfigValueMerge(_HomeIsolatedTestCase):
     """`OktaAuthConfig._save_config_value` merges concurrent saves instead of overwriting."""
 
     def setUp(self):
-        self.tempdir = tempfile.mkdtemp()
-        self._real_home = os.environ.get("HOME")
-        os.environ["HOME"] = self.tempdir
+        super().setUp()
         # Seed the okta-aws config so both instances see the same baseline.
         config_path = os.path.join(self.tempdir, ".okta-aws")
         with open(config_path, "w") as f:
             f.write("[default]\nbase-url = example.okta.com\n")
         self.config_path = config_path
-
-    def tearDown(self):
-        if self._real_home is not None:
-            os.environ["HOME"] = self._real_home
-        else:
-            os.environ.pop("HOME", None)
-        shutil.rmtree(self.tempdir)
 
     def test_two_instances_saving_different_keys_both_persist(self):
         import logging
