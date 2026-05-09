@@ -16,6 +16,27 @@ def _hold_lock(lock_file_path, ready_path, hold_seconds):
         time.sleep(hold_seconds)
 
 
+def _child_write_sts(home_dir, profile_name):
+    """Subprocess entry: set HOME, build AwsAuth, call write_sts_token."""
+    import logging
+
+    os.environ["HOME"] = home_dir
+    from oktaawscli.aws_auth import AwsAuth
+
+    auth = AwsAuth(
+        profile=profile_name,
+        okta_profile="default",
+        account=None,
+        verbose=False,
+        logger=logging.getLogger(profile_name),
+        region="us-east-1",
+        reset=False,
+    )
+    auth.write_sts_token(
+        profile_name, "AKIA_TEST", "secret_TEST", "session_TEST",
+    )
+
+
 class TestLockedHelper(unittest.TestCase):
     """Tests for `locked(path, timeout=...)`."""
 
@@ -124,3 +145,71 @@ class TestAtomicWrite(unittest.TestCase):
 
         leftovers = [n for n in os.listdir(self.tempdir) if n.endswith(".tmp")]
         self.assertEqual(leftovers, [])
+
+
+class TestWriteStsTokenLocking(unittest.TestCase):
+    """`AwsAuth.write_sts_token` acquires a lock on the credentials file."""
+
+    def setUp(self):
+        self.tempdir = tempfile.mkdtemp()
+        self._real_home = os.environ.get("HOME")
+        os.environ["HOME"] = self.tempdir
+        os.makedirs(os.path.join(self.tempdir, ".aws"))
+
+    def tearDown(self):
+        if self._real_home is not None:
+            os.environ["HOME"] = self._real_home
+        else:
+            os.environ.pop("HOME", None)
+        shutil.rmtree(self.tempdir)
+
+    def _make_auth(self):
+        import logging
+
+        from oktaawscli.aws_auth import AwsAuth
+
+        return AwsAuth(
+            profile="test_profile",
+            okta_profile="default",
+            account=None,
+            verbose=False,
+            logger=logging.getLogger("test"),
+            region="us-east-1",
+            reset=False,
+        )
+
+    def test_acquires_lock_on_credentials_file(self):
+        from unittest import mock
+
+        from oktaawscli import _locking as locking_module
+
+        auth = self._make_auth()
+        with mock.patch(
+            "oktaawscli.aws_auth.locked", wraps=locking_module.locked
+        ) as mock_locked:
+            auth.write_sts_token(
+                "test_profile", "AKIA_TEST", "secret_TEST", "session_TEST",
+            )
+        mock_locked.assert_called_once_with(auth.creds_file)
+
+    def test_two_parallel_writes_preserve_both_profiles(self):
+        from configparser import ConfigParser
+
+        ctx = multiprocessing.get_context("fork")
+        procs = [
+            ctx.Process(target=_child_write_sts, args=(self.tempdir, f"profile_{i}"))
+            for i in range(2)
+        ]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(30)
+        for p in procs:
+            self.assertEqual(p.exitcode, 0, f"child exited {p.exitcode}")
+
+        config = ConfigParser()
+        config.read(os.path.join(self.tempdir, ".aws", "credentials"))
+        self.assertIn("profile_0", config.sections())
+        self.assertIn("profile_1", config.sections())
+        self.assertEqual(config.get("profile_0", "aws_access_key_id"), "AKIA_TEST")
+        self.assertEqual(config.get("profile_1", "aws_access_key_id"), "AKIA_TEST")

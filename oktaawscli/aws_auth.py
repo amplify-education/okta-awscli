@@ -11,6 +11,8 @@ import boto3
 from botocore.exceptions import ClientError, NoCredentialsError, ProfileNotFound
 import six
 
+from oktaawscli._locking import atomic_write, locked
+
 
 class AwsAuth:
     """Methods to support AWS authentication using STS"""
@@ -166,23 +168,22 @@ of roles assigned to you."""
         output = "json"
         if not os.path.exists(self.creds_dir):
             os.makedirs(self.creds_dir)
-        config = ConfigParser()
 
-        if os.path.isfile(self.creds_file):
-            config.read(self.creds_file)
+        with locked(self.creds_file):
+            config = ConfigParser()
+            if os.path.isfile(self.creds_file):
+                config.read(self.creds_file)
+            if not config.has_section(profile):
+                config.add_section(profile)
+            config.set(profile, "output", output)
+            config.set(profile, "region", region)
+            config.set(profile, "aws_access_key_id", access_key_id)
+            config.set(profile, "aws_secret_access_key", secret_access_key)
+            config.set(profile, "aws_session_token", session_token)
+            config.set(profile, "aws_security_token", session_token)
+            with atomic_write(self.creds_file) as configfile:
+                config.write(configfile)
 
-        if not config.has_section(profile):
-            config.add_section(profile)
-
-        config.set(profile, "output", output)
-        config.set(profile, "region", region)
-        config.set(profile, "aws_access_key_id", access_key_id)
-        config.set(profile, "aws_secret_access_key", secret_access_key)
-        config.set(profile, "aws_session_token", session_token)
-        config.set(profile, "aws_security_token", session_token)
-
-        with open(self.creds_file, "w+") as configfile:
-            config.write(configfile)
         print("Temporary credentials written to profile: %s" % profile)
         self.logger.info("Invoke using: aws --profile %s <service> <command>" % profile)
 
