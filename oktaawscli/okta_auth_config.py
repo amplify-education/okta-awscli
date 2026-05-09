@@ -4,6 +4,8 @@ import os
 from configparser import ConfigParser
 from getpass import getpass, getuser
 
+from oktaawscli._locking import atomic_write, locked
+
 try:
     input = raw_input
 except NameError:
@@ -149,12 +151,16 @@ class OktaAuthConfig:
         )
 
     def _save_config_value(self, section, key, value):
-        # has_section explicitly doesn't check for the default section, so only ask if the section exists if
-        # its not the default section
-        if section != DEFAULT_SECTION and not self._value.has_section(section):
-            self._value.add_section(section)
+        with locked(self.config_path):
+            # Re-read inside the lock so concurrent saves merge instead of clobbering.
+            fresh = ConfigParser(default_section=DEFAULT_SECTION)
+            fresh.read(self.config_path)
 
-        self._value.set(section, key, value)
+            if section != DEFAULT_SECTION and not fresh.has_section(section):
+                fresh.add_section(section)
+            fresh.set(section, key, value)
 
-        with open(self.config_path, "w+") as configfile:
-            self._value.write(configfile)
+            with atomic_write(self.config_path) as configfile:
+                fresh.write(configfile)
+
+            self._value = fresh

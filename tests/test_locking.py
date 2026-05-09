@@ -430,3 +430,46 @@ class TestGetRoleInfoLocking(unittest.TestCase):
                 )
             ],
         )
+
+
+class TestSaveConfigValueMerge(unittest.TestCase):
+    """`OktaAuthConfig._save_config_value` merges concurrent saves instead of overwriting."""
+
+    def setUp(self):
+        self.tempdir = tempfile.mkdtemp()
+        self._real_home = os.environ.get("HOME")
+        os.environ["HOME"] = self.tempdir
+        # Seed the okta-aws config so both instances see the same baseline.
+        config_path = os.path.join(self.tempdir, ".okta-aws")
+        with open(config_path, "w") as f:
+            f.write("[default]\nbase-url = example.okta.com\n")
+        self.config_path = config_path
+
+    def tearDown(self):
+        if self._real_home is not None:
+            os.environ["HOME"] = self._real_home
+        else:
+            os.environ.pop("HOME", None)
+        shutil.rmtree(self.tempdir)
+
+    def test_two_instances_saving_different_keys_both_persist(self):
+        import logging
+        from configparser import ConfigParser
+
+        from oktaawscli.okta_auth_config import OktaAuthConfig
+
+        logger = logging.getLogger("test")
+        # Two instances both read the same baseline at construction.
+        config_a = OktaAuthConfig(logger=logger, reset=False)
+        config_b = OktaAuthConfig(logger=logger, reset=False)
+
+        # A saves a role; B's in-memory state is now stale relative to disk.
+        config_a.save_chosen_role_for_profile("default", "arn:aws:iam::111:role/role_a")
+        # B saves a factor — must merge with A's role on disk, not clobber it.
+        config_b.save_chosen_factor_for_profile("default", "push")
+
+        parser = ConfigParser(default_section="default")
+        parser.read(self.config_path)
+        self.assertEqual(parser.get("default", "role"), "arn:aws:iam::111:role/role_a")
+        self.assertEqual(parser.get("default", "factor"), "push")
+        self.assertEqual(parser.get("default", "base-url"), "example.okta.com")
