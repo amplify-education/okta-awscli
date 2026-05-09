@@ -17,5 +17,5 @@ setup(
             "okta-awscli=oktaawscli.okta_awscli:main",
         ],
     },
-    install_requires=["requests", "click", "bs4", "boto3", "ConfigParser", "six"],
+    install_requires=["requests", "click", "bs4", "boto3", "ConfigParser", "six", "filelock"],
 )
