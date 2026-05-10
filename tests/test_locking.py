@@ -457,3 +457,44 @@ class TestSaveConfigValueMerge(_HomeIsolatedTestCase):
         self.assertEqual(parser.get("default", "role"), "arn:aws:iam::111:role/role_a")
         self.assertEqual(parser.get("default", "factor"), "push")
         self.assertEqual(parser.get("default", "base-url"), "example.okta.com")
+
+
+class TestCacheSessionIdAtomicWrite(_HomeIsolatedTestCase):
+    """`OktaAuth.cache_session_id` writes ~/.okta-token atomically."""
+
+    def _make_okta_auth(self):
+        import logging
+        from oktaawscli.okta_auth import OktaAuth
+
+        # OktaAuth's __init__ takes (logger, ...). Construct minimally.
+        # We only need cache_session_id — bypass __init__ to avoid network setup.
+        auth = OktaAuth.__new__(OktaAuth)
+        auth.logger = logging.getLogger("test")
+        return auth
+
+    def test_writes_session_id_atomically_on_clean_exit(self):
+        import json
+
+        auth = self._make_okta_auth()
+        auth.cache_session_id("sess_abc", "2099-01-01T00:00:00.000Z")
+
+        token_path = os.path.join(self.tempdir, ".okta-token")
+        with open(token_path) as f:
+            data = json.load(f)
+        self.assertEqual(data["session_id"], "sess_abc")
+        self.assertEqual(data["expiration_date"], "2099-01-01T00:00:00.000Z")
+
+    def test_preserves_existing_token_when_writer_raises(self):
+        from unittest import mock
+
+        token_path = os.path.join(self.tempdir, ".okta-token")
+        with open(token_path, "w") as f:
+            f.write('{"session_id": "original", "expiration_date": "2099-01-01T00:00:00.000Z"}')
+
+        auth = self._make_okta_auth()
+        with mock.patch("oktaawscli.okta_auth.json.dumps", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                auth.cache_session_id("new_sess", "2099-01-01T00:00:00.000Z")
+
+        with open(token_path) as f:
+            self.assertIn("original", f.read())

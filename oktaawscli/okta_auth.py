@@ -9,6 +9,8 @@ import requests
 
 from bs4 import BeautifulSoup as bs
 
+from oktaawscli._locking import atomic_write
+
 try:
     input = input
 except NameError:
@@ -203,17 +205,16 @@ class OktaAuth:
         session_info = {"session_id": session_id, "expiration_date": expiration_date}
         session_path = os.path.join(os.path.expanduser("~"), ".okta-token")
         self.logger.info("Cacheing Okta session id to ~/.okta-token")
-        session_file = open(session_path, "w")
-        session_file.write(
-            json.dumps(
-                session_info,
-                sort_keys=True,
-                indent=4,
-                separators=(",", ": "),
-                default=str,
+        with atomic_write(session_path) as session_file:
+            session_file.write(
+                json.dumps(
+                    session_info,
+                    sort_keys=True,
+                    indent=4,
+                    separators=(",", ": "),
+                    default=str,
+                )
             )
-        )
-        session_file.close()
 
     def get_cached_session_id(self):
         """Gets Okta session id from ~/.okta-token if valid"""
