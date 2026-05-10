@@ -498,3 +498,27 @@ class TestCacheSessionIdAtomicWrite(_HomeIsolatedTestCase):
 
         with open(token_path) as f:
             self.assertIn("original", f.read())
+
+
+class TestCliTimeoutHandling(unittest.TestCase):
+    """The CLI catches filelock.Timeout and exits with a friendly message."""
+
+    def test_filelock_timeout_produces_friendly_error_and_exit_1(self):
+        from unittest import mock
+
+        from click.testing import CliRunner
+        from filelock import Timeout
+
+        from oktaawscli.okta_awscli import main
+
+        runner = CliRunner()
+        with mock.patch(
+            "oktaawscli.okta_awscli.get_credentials",
+            side_effect=Timeout("/tmp/.aws/credentials.lock"),
+        ):
+            result = runner.invoke(main, ["--profile", "p"])
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("/tmp/.aws/credentials.lock", result.output)
+        # Must NOT show a raw traceback — friendly handling required.
+        self.assertNotIn("Traceback", result.output)
