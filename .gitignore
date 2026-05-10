@@ -5,3 +5,6 @@ dist
 .idea/*
 *.iml
 .python-version
+.tox/
+build/
+__pycache__/
