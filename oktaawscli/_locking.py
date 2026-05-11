@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from filelock import FileLock
 
 LOCK_TIMEOUT_SECONDS = 60
+INTERACTIVE_LOCK_TIMEOUT_SECONDS = 300
 
 
 def locked(path, timeout=LOCK_TIMEOUT_SECONDS):

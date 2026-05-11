@@ -166,6 +166,24 @@ class _HomeIsolatedTestCase(unittest.TestCase):
             os.environ.pop("HOME", None)
         shutil.rmtree(self.tempdir)
 
+    def _make_okta_auth(self):
+        """Build a minimally-wired OktaAuth bypassing __init__ for unit tests."""
+        import logging
+        from oktaawscli.okta_auth import OktaAuth
+
+        auth = OktaAuth.__new__(OktaAuth)
+        auth.logger = logging.getLogger("test")
+        auth.https_base_url = "https://example.okta.com"
+        auth.app = None
+        auth.okta_auth_config = None
+        auth.okta_profile = "default"
+        auth.totp_token = None
+        auth.factor = ""
+        auth.verbose = False
+        auth.debug = False
+        auth.token_path = os.path.join(self.tempdir, ".okta-token")
+        return auth
+
 
 class TestWriteStsTokenLocking(_HomeIsolatedTestCase):
     """`AwsAuth.write_sts_token` acquires a lock on the credentials file."""
@@ -462,16 +480,6 @@ class TestSaveConfigValueMerge(_HomeIsolatedTestCase):
 class TestCacheSessionIdAtomicWrite(_HomeIsolatedTestCase):
     """`OktaAuth.cache_session_id` writes ~/.okta-token atomically."""
 
-    def _make_okta_auth(self):
-        import logging
-        from oktaawscli.okta_auth import OktaAuth
-
-        # OktaAuth's __init__ takes (logger, ...). Construct minimally.
-        # We only need cache_session_id — bypass __init__ to avoid network setup.
-        auth = OktaAuth.__new__(OktaAuth)
-        auth.logger = logging.getLogger("test")
-        return auth
-
     def test_writes_session_id_atomically_on_clean_exit(self):
         import json
 
@@ -527,18 +535,6 @@ class TestCliTimeoutHandling(unittest.TestCase):
 class TestOktaApiErrorHandling(_HomeIsolatedTestCase):
     """Okta API call sites handle error responses with clear messages, not TypeError."""
 
-    def _make_okta_auth(self):
-        import logging
-        from oktaawscli.okta_auth import OktaAuth
-
-        auth = OktaAuth.__new__(OktaAuth)
-        auth.logger = logging.getLogger("test")
-        auth.https_base_url = "https://example.okta.com"
-        auth.app = None
-        auth.okta_auth_config = None
-        auth.okta_profile = "default"
-        return auth
-
     def test_get_apps_exits_cleanly_on_error_response(self):
         from unittest import mock
 
@@ -581,22 +577,6 @@ class TestOktaApiErrorHandling(_HomeIsolatedTestCase):
 class TestPrimaryAuthLocking(_HomeIsolatedTestCase):
     """`OktaAuth.primary_auth` locks the auth flow so parallel runs serialize."""
 
-    def _make_okta_auth(self):
-        import logging
-        from oktaawscli.okta_auth import OktaAuth
-
-        auth = OktaAuth.__new__(OktaAuth)
-        auth.logger = logging.getLogger("test")
-        auth.https_base_url = "https://example.okta.com"
-        auth.app = None
-        auth.okta_auth_config = None
-        auth.okta_profile = "default"
-        auth.totp_token = None
-        auth.factor = ""
-        auth.verbose = False
-        auth.debug = False
-        return auth
-
     def test_fast_path_skips_lock_when_cached_session_valid(self):
         from unittest import mock
 
@@ -612,12 +592,9 @@ class TestPrimaryAuthLocking(_HomeIsolatedTestCase):
         from unittest import mock
 
         from oktaawscli import _locking as locking_module
+        from oktaawscli._locking import INTERACTIVE_LOCK_TIMEOUT_SECONDS
 
         auth = self._make_okta_auth()
-        token_path = os.path.join(self.tempdir, ".okta-token")
-        # No cached session: get_cached_session_id returns None.
-        # The lock IS acquired; inside the lock the cache is still empty, so we proceed to auth.
-        # We mock the auth network calls to short-circuit immediately.
         auth.okta_auth_config = mock.MagicMock()
         auth.okta_auth_config.username_for.return_value = "user"
         auth.okta_auth_config.password_for.return_value = "pw"
@@ -636,28 +613,42 @@ class TestPrimaryAuthLocking(_HomeIsolatedTestCase):
             result = auth.primary_auth()
 
         self.assertEqual(result, "fresh_sid")
-        mock_locked.assert_called_once_with(token_path, timeout=300)
+        mock_locked.assert_called_once_with(
+            auth.token_path, timeout=INTERACTIVE_LOCK_TIMEOUT_SECONDS
+        )
         mock_get_session.assert_called_once_with("stoken")
 
     def test_slow_path_uses_session_refreshed_by_peer_while_waiting(self):
         """If another process refreshed the cached session while we waited for the lock, use it."""
         from unittest import mock
 
+        from oktaawscli import _locking as locking_module
+        from oktaawscli._locking import INTERACTIVE_LOCK_TIMEOUT_SECONDS
+
         auth = self._make_okta_auth()
-        # First call (fast path, outside lock): no session. Second call (inside lock): session is now valid.
+        # First read (outside lock): no session. Second read (inside lock): peer wrote one.
         get_cached_calls = [None, "peer_refreshed_sid"]
 
         def cached_side_effect():
             return get_cached_calls.pop(0)
 
-        with mock.patch.object(auth, "get_cached_session_id", side_effect=cached_side_effect), \
-             mock.patch.object(auth, "check_for_desync", return_value=False) as mock_desync, \
-             mock.patch("oktaawscli.okta_auth.locked"), \
+        with mock.patch.object(
+                auth, "get_cached_session_id", side_effect=cached_side_effect,
+             ) as mock_get_cached, \
+             mock.patch.object(auth, "check_for_desync") as mock_desync, \
+             mock.patch(
+                 "oktaawscli.okta_auth.locked",
+                 wraps=locking_module.locked,
+             ) as mock_locked, \
              mock.patch("oktaawscli.okta_auth.requests.post") as mock_post:
             result = auth.primary_auth()
 
         self.assertEqual(result, "peer_refreshed_sid")
-        # No actual auth network call should have been made — peer handled it.
+        mock_locked.assert_called_once_with(
+            auth.token_path, timeout=INTERACTIVE_LOCK_TIMEOUT_SECONDS
+        )
+        self.assertEqual(mock_get_cached.call_count, 2)
         mock_post.assert_not_called()
-        # check_for_desync called once (inside the lock).
-        self.assertEqual(mock_desync.call_count, 1)
+        # The cache-changed optimization skips check_for_desync inside the lock,
+        # and the outside short-circuit avoids it when session_id is None.
+        mock_desync.assert_not_called()
