@@ -9,7 +9,7 @@ import requests
 
 from bs4 import BeautifulSoup as bs
 
-from oktaawscli._locking import atomic_write
+from oktaawscli._locking import atomic_write, locked
 
 try:
     input = input
@@ -39,54 +39,66 @@ class OktaAuth:
             open(okta_info, "a").close()
 
     def primary_auth(self):
-        """Performs primary auth against Okta"""
-        # check if token is valid
+        """Performs primary auth against Okta, serializing parallel runs through a lock."""
+        # Fast path: a valid cached session lets us skip the lock entirely.
         session_id = self.get_cached_session_id()
-        if session_id is not None:
-            # if there's no remote-local desync, return the cached token
-            if self.check_for_desync(session_id) is False:
-                return session_id
-            else:
-                self.logger.warning("Current Okta session was invalidated. Refreshing token now...")
-        auth_data = {
-            "username": self.okta_auth_config.username_for(self.okta_profile),
-            "password": self.okta_auth_config.password_for(self.okta_profile),
-        }
-        # https://developer.okta.com/docs/reference/api/authn/
-        resp = requests.post(self.https_base_url + "/api/v1/authn", json=auth_data)
-        resp_json = resp.json()
-        if "status" in resp_json:
-            if resp_json["status"] == "MFA_REQUIRED":
-                factors_list = resp_json["_embedded"]["factors"]
-                state_token = resp_json["stateToken"]
-                session_token = self.verify_mfa(factors_list, state_token)
-            elif resp_json["status"] == "SUCCESS":
-                session_token = resp_json["sessionToken"]
-            elif resp_json["status"] == "MFA_ENROLL":
-                self.logger.warning(
-                    """MFA not enrolled. Cannot continue.
-                Please enroll an MFA factor in the Okta Web UI first!"""
-                )
-                sys.exit(2)
-            elif resp_json["status"] == "LOCKED_OUT":
-                self.logger.error(
-                    """Account is locked. Cannot continue.
-                Please contact you administrator in order to unlock the account!"""
-                )
-                sys.exit(1)
-            else:
-                self.logger.error(
-                    f"Unknown authentication status: {resp_json['status']}"
-                )
-                sys.exit(1)
-        elif resp.status_code != 200:
-            self.logger.error(resp_json["errorSummary"])
-            exit(1)
-        else:
-            self.logger.error(resp_json)
-            exit(1)
+        if session_id is not None and not self.check_for_desync(session_id):
+            return session_id
 
-        return self.get_session(session_token)
+        # Slow path: lock the token file so only one process at a time runs the
+        # auth flow. The 300s timeout accommodates interactive MFA.
+        token_path = os.path.join(os.path.expanduser("~"), ".okta-token")
+        with locked(token_path, timeout=300):
+            # Re-read inside the lock: a peer may have refreshed while we waited.
+            session_id = self.get_cached_session_id()
+            if session_id is not None and not self.check_for_desync(session_id):
+                self.logger.info(
+                    "Cached Okta session was refreshed by another process; using it."
+                )
+                return session_id
+
+            self.logger.warning(
+                "Cached Okta session is missing or invalid. Authenticating now..."
+            )
+            auth_data = {
+                "username": self.okta_auth_config.username_for(self.okta_profile),
+                "password": self.okta_auth_config.password_for(self.okta_profile),
+            }
+            # https://developer.okta.com/docs/reference/api/authn/
+            resp = requests.post(self.https_base_url + "/api/v1/authn", json=auth_data)
+            resp_json = resp.json()
+            if "status" in resp_json:
+                if resp_json["status"] == "MFA_REQUIRED":
+                    factors_list = resp_json["_embedded"]["factors"]
+                    state_token = resp_json["stateToken"]
+                    session_token = self.verify_mfa(factors_list, state_token)
+                elif resp_json["status"] == "SUCCESS":
+                    session_token = resp_json["sessionToken"]
+                elif resp_json["status"] == "MFA_ENROLL":
+                    self.logger.warning(
+                        """MFA not enrolled. Cannot continue.
+                Please enroll an MFA factor in the Okta Web UI first!"""
+                    )
+                    sys.exit(2)
+                elif resp_json["status"] == "LOCKED_OUT":
+                    self.logger.error(
+                        """Account is locked. Cannot continue.
+                Please contact you administrator in order to unlock the account!"""
+                    )
+                    sys.exit(1)
+                else:
+                    self.logger.error(
+                        f"Unknown authentication status: {resp_json['status']}"
+                    )
+                    sys.exit(1)
+            elif resp.status_code != 200:
+                self.logger.error(resp_json["errorSummary"])
+                exit(1)
+            else:
+                self.logger.error(resp_json)
+                exit(1)
+
+            return self.get_session(session_token)
 
     def verify_mfa(self, factors_list, state_token):
         """Performs MFA auth against Okta"""
