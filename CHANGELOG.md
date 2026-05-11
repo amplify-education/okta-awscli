@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.13] 2026-05-11
+### Changed
+- Cross-process file locking and atomic-rename writes for `~/.aws/credentials`, `~/.okta-aws`, and `~/.okta-alias-info`. Multiple `okta-awscli` processes can now run in parallel against the same dotfiles without clobbering each other.
+- `OktaAuth.primary_auth` now acquires a 300-second lock around the Okta authentication flow. Parallel runs serialize through a single MFA prompt; the rest pick up the freshly-cached session and skip auth entirely.
+- Okta API error responses (`errorCode` dicts) surface as a one-line exit message with the error code and id, instead of `TypeError: string indices must be integers, not 'str'`.
+- Okta rate-limit responses (`errorCode: E0000047`) are retried with proportional-jitter exponential backoff (up to 5 attempts, ~62s worst case).
+- `~/.okta-token` is written atomically; partial-file corruption from a process killed mid-write no longer breaks the cached-session reader path.
+- `filelock.Timeout` from the locking helpers is caught at the CLI entry point and surfaces as a one-line error message instead of a stack trace.
+- Latent `NoSectionError` in `copy_to_default` (raised against a credentials file with a populated source profile but no pre-existing `[default]` section) is fixed.
+
+### Added
+- `oktaawscli/_locking.py` exposing `locked(path, timeout=...)` and `atomic_write(path)` primitives, plus `LOCK_TIMEOUT_SECONDS` (60s default) and `INTERACTIVE_LOCK_TIMEOUT_SECONDS` (300s for auth flow) constants.
+- `tox.ini` and a `tests/` unittest-based test suite covering the locking, atomic-write, merge-on-write, and rate-limit behaviors.
+- `filelock` runtime dependency.
+
 ## [0.4.8] 2024-05-02
 ### Changed
 - Log exception when encountering unknown ClientError error while listing AWS account aliases.
