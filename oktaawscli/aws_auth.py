@@ -191,46 +191,29 @@ of roles assigned to you."""
         """Reads STS auth information from credentials file"""
         if not os.path.exists(self.creds_dir):
             os.makedirs(self.creds_dir)
-        config = ConfigParser()
 
-        if os.path.isfile(self.creds_file):
-            config.read(self.creds_file)
+        with locked(self.creds_file):
+            config = ConfigParser()
+            if os.path.isfile(self.creds_file):
+                config.read(self.creds_file)
+            if not config.has_section(profile):
+                config.add_section(profile)
+            if not config.has_section("default"):
+                config.add_section("default")
 
-        if not config.has_section(profile):
-            config.add_section(profile)
-
-        if config.has_option(profile, "output"):
-            config.set("default", "output", config.get(profile, "output"))
-
-        if config.has_option(profile, "region"):
-            config.set("default", "region", config.get(profile, "region"))
-
-        if config.has_option(profile, "aws_access_key_id"):
-            config.set(
-                "default", "aws_access_key_id", config.get(profile, "aws_access_key_id")
-            )
-
-        if config.has_option(profile, "aws_secret_access_key"):
-            config.set(
-                "default",
+            for key in (
+                "output",
+                "region",
+                "aws_access_key_id",
                 "aws_secret_access_key",
-                config.get(profile, "aws_secret_access_key"),
-            )
-
-        if config.has_option(profile, "aws_session_token"):
-            config.set(
-                "default", "aws_session_token", config.get(profile, "aws_session_token")
-            )
-
-        if config.has_option(profile, "aws_security_token"):
-            config.set(
-                "default",
+                "aws_session_token",
                 "aws_security_token",
-                config.get(profile, "aws_security_token"),
-            )
+            ):
+                if config.has_option(profile, key):
+                    config.set("default", key, config.get(profile, key))
 
-        with open(self.creds_file, "w+") as configfile:
-            config.write(configfile)
+            with atomic_write(self.creds_file) as configfile:
+                config.write(configfile)
 
     @staticmethod
     def __extract_available_roles_from(assertion):

@@ -213,3 +213,82 @@ class TestWriteStsTokenLocking(unittest.TestCase):
         self.assertIn("profile_1", config.sections())
         self.assertEqual(config.get("profile_0", "aws_access_key_id"), "AKIA_TEST")
         self.assertEqual(config.get("profile_1", "aws_access_key_id"), "AKIA_TEST")
+
+
+class TestCopyToDefaultLocking(unittest.TestCase):
+    """`AwsAuth.copy_to_default` acquires a lock on the credentials file."""
+
+    def setUp(self):
+        self.tempdir = tempfile.mkdtemp()
+        self._real_home = os.environ.get("HOME")
+        os.environ["HOME"] = self.tempdir
+        os.makedirs(os.path.join(self.tempdir, ".aws"))
+        # Pre-populate a profile so copy_to_default has something to copy
+        creds_path = os.path.join(self.tempdir, ".aws", "credentials")
+        with open(creds_path, "w") as f:
+            f.write(
+                "[source]\n"
+                "output = json\n"
+                "region = us-east-1\n"
+                "aws_access_key_id = AKIA_SRC\n"
+                "aws_secret_access_key = secret_SRC\n"
+                "aws_session_token = session_SRC\n"
+                "aws_security_token = session_SRC\n"
+            )
+
+    def tearDown(self):
+        if self._real_home is not None:
+            os.environ["HOME"] = self._real_home
+        else:
+            os.environ.pop("HOME", None)
+        shutil.rmtree(self.tempdir)
+
+    def _make_auth(self):
+        import logging
+
+        from oktaawscli.aws_auth import AwsAuth
+
+        return AwsAuth(
+            profile="source",
+            okta_profile="default",
+            account=None,
+            verbose=False,
+            logger=logging.getLogger("test"),
+            region="us-east-1",
+            reset=False,
+        )
+
+    def test_acquires_lock_on_credentials_file(self):
+        from configparser import ConfigParser
+        from unittest import mock
+
+        from oktaawscli import _locking as locking_module
+
+        auth = self._make_auth()
+        with mock.patch(
+            "oktaawscli.aws_auth.locked", wraps=locking_module.locked
+        ) as mock_locked:
+            auth.copy_to_default("source")
+
+        mock_locked.assert_called_once_with(auth.creds_file)
+        config = ConfigParser()
+        config.read(os.path.join(self.tempdir, ".aws", "credentials"))
+        self.assertEqual(config.get("default", "aws_access_key_id"), "AKIA_SRC")
+
+    def test_creates_default_section_when_missing(self):
+        """copy_to_default works against a file lacking a pre-existing [default] section."""
+        from configparser import ConfigParser
+
+        auth = self._make_auth()
+        # The setUp credentials file has only [source], no [default] — verify that.
+        pre = ConfigParser()
+        pre.read(os.path.join(self.tempdir, ".aws", "credentials"))
+        self.assertNotIn("default", pre.sections())
+
+        auth.copy_to_default("source")
+
+        config = ConfigParser()
+        config.read(os.path.join(self.tempdir, ".aws", "credentials"))
+        self.assertIn("default", config.sections())
+        self.assertEqual(config.get("default", "aws_access_key_id"), "AKIA_SRC")
+        self.assertEqual(config.get("default", "aws_security_token"), "session_SRC")
