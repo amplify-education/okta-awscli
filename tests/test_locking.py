@@ -652,3 +652,121 @@ class TestPrimaryAuthLocking(_HomeIsolatedTestCase):
         # The cache-changed optimization skips check_for_desync inside the lock,
         # and the outside short-circuit avoids it when session_id is None.
         mock_desync.assert_not_called()
+
+
+class TestOktaRateLimitRetry(_HomeIsolatedTestCase):
+    """Okta API call sites retry on E0000047 with backoff before exiting."""
+
+    def _rate_limit_response(self):
+        from unittest import mock
+
+        resp = mock.MagicMock()
+        resp.json.return_value = {
+            "errorCode": "E0000047",
+            "errorSummary": "API call exceeded rate limit due to too many requests.",
+            "errorId": "oae_rate_limit",
+        }
+        resp.status_code = 429
+        return resp
+
+    def _success_apps_response(self):
+        from unittest import mock
+
+        resp = mock.MagicMock()
+        resp.json.return_value = [
+            {
+                "appName": "amazon_aws",
+                "label": "AWS Prod",
+                "linkUrl": "https://example.okta.com/aws-prod",
+                "sortOrder": 1,
+            }
+        ]
+        resp.status_code = 200
+        return resp
+
+    def test_get_apps_retries_on_rate_limit_then_succeeds(self):
+        from unittest import mock
+
+        auth = self._make_okta_auth()
+        # Pre-select the app so get_apps doesn't prompt for input.
+        auth.app = "AWS Prod"
+
+        # First two calls rate-limited, third succeeds.
+        responses = [
+            self._rate_limit_response(),
+            self._rate_limit_response(),
+            self._success_apps_response(),
+        ]
+
+        with mock.patch("oktaawscli.okta_auth.requests.get", side_effect=responses) as mock_get, \
+             mock.patch("oktaawscli.okta_auth.time.sleep") as mock_sleep:
+            label, link = auth.get_apps("sid")
+
+        self.assertEqual(label, "AWS Prod")
+        self.assertEqual(link, "https://example.okta.com/aws-prod")
+        self.assertEqual(mock_get.call_count, 3)
+        # Two backoff sleeps before the third (successful) attempt.
+        self.assertEqual(mock_sleep.call_count, 2)
+
+    def test_get_apps_exits_after_exhausting_retries(self):
+        from unittest import mock
+
+        auth = self._make_okta_auth()
+        auth.app = "AWS Prod"
+
+        with mock.patch(
+                "oktaawscli.okta_auth.requests.get",
+                return_value=self._rate_limit_response(),
+             ) as mock_get, \
+             mock.patch("oktaawscli.okta_auth.time.sleep"):
+            with self.assertRaises(SystemExit) as cm:
+                auth.get_apps("sid")
+
+        self.assertEqual(cm.exception.code, 1)
+        from oktaawscli.okta_auth import MAX_OKTA_RATE_LIMIT_RETRIES
+        self.assertEqual(mock_get.call_count, MAX_OKTA_RATE_LIMIT_RETRIES)
+
+    def test_get_session_retries_on_rate_limit_then_succeeds(self):
+        from unittest import mock
+
+        auth = self._make_okta_auth()
+        success = mock.MagicMock()
+        success.json.return_value = {
+            "id": "fresh_sid",
+            "expiresAt": "2099-01-01T00:00:00.000Z",
+        }
+        success.status_code = 200
+
+        responses = [self._rate_limit_response(), success]
+
+        with mock.patch("oktaawscli.okta_auth.requests.post", side_effect=responses) as mock_post, \
+             mock.patch.object(auth, "cache_session_id"), \
+             mock.patch("oktaawscli.okta_auth.time.sleep"):
+            sid = auth.get_session("stoken")
+
+        self.assertEqual(sid, "fresh_sid")
+        self.assertEqual(mock_post.call_count, 2)
+
+    def test_non_rate_limit_error_exits_without_retry(self):
+        """Non-E0000047 errors should not trigger the retry loop."""
+        from unittest import mock
+
+        auth = self._make_okta_auth()
+        non_rate_limit_resp = mock.MagicMock()
+        non_rate_limit_resp.json.return_value = {
+            "errorCode": "E0000011",
+            "errorSummary": "Invalid token provided",
+            "errorId": "oae_invalid",
+        }
+        non_rate_limit_resp.status_code = 401
+
+        with mock.patch(
+                "oktaawscli.okta_auth.requests.get",
+                return_value=non_rate_limit_resp,
+             ) as mock_get, \
+             mock.patch("oktaawscli.okta_auth.time.sleep") as mock_sleep:
+            with self.assertRaises(SystemExit):
+                auth.get_apps("sid")
+
+        self.assertEqual(mock_get.call_count, 1)
+        mock_sleep.assert_not_called()

@@ -1,6 +1,7 @@
 """ Handles auth to Okta and returns SAML assertion """
 # pylint: disable=C0325,R0912,C1801
 import os
+import random
 import sys
 import time
 import json
@@ -10,6 +11,9 @@ import requests
 from bs4 import BeautifulSoup as bs
 
 from oktaawscli._locking import INTERACTIVE_LOCK_TIMEOUT_SECONDS, atomic_write, locked
+
+MAX_OKTA_RATE_LIMIT_RETRIES = 5
+OKTA_RATE_LIMIT_BACKOFF_BASE_SECONDS = 1.0
 
 try:
     input = input
@@ -202,7 +206,10 @@ class OktaAuth:
         """Gets a session cookie from a session token"""
         data = {"sessionToken": session_token}
         # https://developer.okta.com/docs/guides/ie-limitations/main/#sessions-apis
-        resp = requests.post(self.https_base_url + "/api/v1/sessions", json=data).json()
+        resp = self._okta_json_request(
+            lambda: requests.post(self.https_base_url + "/api/v1/sessions", json=data),
+            "get_session",
+        )
         self._exit_on_okta_error(resp, "get_session")
         self.cache_session_id(resp["id"], resp["expiresAt"])
         return resp["id"]
@@ -261,6 +268,34 @@ class OktaAuth:
             self.logger.error(message)
             return True
 
+    def _okta_json_request(self, request_callable, context):
+        """Call `request_callable()` and return parsed JSON, retrying on Okta rate-limit.
+
+        Other Okta errors are surfaced via `_exit_on_okta_error` (clean exit, not retry).
+        After exhausting retries the method logs an error and exits 1.
+        """
+        for attempt in range(MAX_OKTA_RATE_LIMIT_RETRIES):
+            resp = request_callable()
+            body = resp.json()
+            if not (isinstance(body, dict) and body.get("errorCode") == "E0000047"):
+                return body
+            backoff = OKTA_RATE_LIMIT_BACKOFF_BASE_SECONDS * (2 ** attempt)
+            delay = backoff + random.uniform(0, backoff)
+            self.logger.warning(
+                "Okta rate-limited in %s; retrying in %.1fs (attempt %d/%d)",
+                context,
+                delay,
+                attempt + 1,
+                MAX_OKTA_RATE_LIMIT_RETRIES,
+            )
+            time.sleep(delay)
+        self.logger.error(
+            "Okta API still rate-limited in %s after %d retries; giving up.",
+            context,
+            MAX_OKTA_RATE_LIMIT_RETRIES,
+        )
+        sys.exit(1)
+
     def _exit_on_okta_error(self, resp_body, context):
         """Exit cleanly if the parsed JSON body is an Okta error response.
 
@@ -282,9 +317,12 @@ class OktaAuth:
         sid = "sid=%s" % session_id
         headers = {"Cookie": sid}
         # https://developer.okta.com/docs/api/openapi/okta-management/management/tag/UserResources/#tag/UserResources/operation/listAppLinks
-        resp = requests.get(
-            self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
-        ).json()
+        resp = self._okta_json_request(
+            lambda: requests.get(
+                self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
+            ),
+            "get_apps",
+        )
         self._exit_on_okta_error(resp, "get_apps")
 
         aws_apps = []
