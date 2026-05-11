@@ -522,3 +522,57 @@ class TestCliTimeoutHandling(unittest.TestCase):
         self.assertIn("/tmp/.aws/credentials.lock", result.output)
         # Must NOT show a raw traceback — friendly handling required.
         self.assertNotIn("Traceback", result.output)
+
+
+class TestOktaApiErrorHandling(_HomeIsolatedTestCase):
+    """Okta API call sites handle error responses with clear messages, not TypeError."""
+
+    def _make_okta_auth(self):
+        import logging
+        from oktaawscli.okta_auth import OktaAuth
+
+        auth = OktaAuth.__new__(OktaAuth)
+        auth.logger = logging.getLogger("test")
+        auth.https_base_url = "https://example.okta.com"
+        auth.app = None
+        auth.okta_auth_config = None
+        auth.okta_profile = "default"
+        return auth
+
+    def test_get_apps_exits_cleanly_on_error_response(self):
+        from unittest import mock
+
+        auth = self._make_okta_auth()
+        error_response = {
+            "errorCode": "E0000011",
+            "errorSummary": "Invalid token provided",
+            "errorLink": "E0000011",
+            "errorId": "oae123",
+            "errorCauses": [],
+        }
+        mock_resp = mock.MagicMock()
+        mock_resp.json.return_value = error_response
+        mock_resp.status_code = 401
+        with mock.patch("oktaawscli.okta_auth.requests.get", return_value=mock_resp):
+            with self.assertRaises(SystemExit) as cm:
+                auth.get_apps("stale_sid")
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_get_session_exits_cleanly_on_error_response(self):
+        from unittest import mock
+
+        auth = self._make_okta_auth()
+        error_response = {
+            "errorCode": "E0000004",
+            "errorSummary": "Authentication failed",
+            "errorLink": "E0000004",
+            "errorId": "oae456",
+            "errorCauses": [],
+        }
+        mock_resp = mock.MagicMock()
+        mock_resp.json.return_value = error_response
+        mock_resp.status_code = 401
+        with mock.patch("oktaawscli.okta_auth.requests.post", return_value=mock_resp):
+            with self.assertRaises(SystemExit) as cm:
+                auth.get_session("bad_session_token")
+        self.assertEqual(cm.exception.code, 1)

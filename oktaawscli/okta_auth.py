@@ -197,6 +197,7 @@ class OktaAuth:
         data = {"sessionToken": session_token}
         # https://developer.okta.com/docs/guides/ie-limitations/main/#sessions-apis
         resp = requests.post(self.https_base_url + "/api/v1/sessions", json=data).json()
+        self._exit_on_okta_error(resp, "get_session")
         self.cache_session_id(resp["id"], resp["expiresAt"])
         return resp["id"]
 
@@ -258,6 +259,22 @@ class OktaAuth:
             return True
 
 
+    def _exit_on_okta_error(self, resp_body, context):
+        """Exit cleanly if the parsed JSON body is an Okta error response.
+
+        Okta error bodies are dicts with an `errorCode` key. List-shaped responses
+        (the success shape for endpoints like appLinks) skip the check.
+        """
+        if isinstance(resp_body, dict) and resp_body.get("errorCode"):
+            self.logger.error(
+                "Okta API error in %s: %s (errorCode=%s, errorId=%s)",
+                context,
+                resp_body.get("errorSummary", "<no summary>"),
+                resp_body["errorCode"],
+                resp_body.get("errorId", "<no id>"),
+            )
+            sys.exit(1)
+
     def get_apps(self, session_id):
         """Gets apps for the user"""
         sid = "sid=%s" % session_id
@@ -266,6 +283,7 @@ class OktaAuth:
         resp = requests.get(
             self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
         ).json()
+        self._exit_on_okta_error(resp, "get_apps")
 
         aws_apps = []
         for app in resp:
