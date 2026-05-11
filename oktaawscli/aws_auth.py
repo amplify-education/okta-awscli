@@ -233,54 +233,54 @@ of roles assigned to you."""
     def __get_role_info(self, roles, assertion):
         """Gets role info from okta-info.json"""
         info_file_path = os.path.expanduser("~") + "/.okta-alias-info"
-        info_file = open(info_file_path, "r")
-        okta_info = info_file.read()
-        if okta_info == "":
-            okta_info = {}
-        else:
-            okta_info = json.loads(okta_info)
-        info_file.close()
 
-        role_info = []
-        new_okta_info = {}
-        for role in roles:
-            # read the role info from ~/.okta-info.json
-            role_updated = okta_info.get(role.role_arn, {})
-            alias = role_updated.get("alias")
+        with locked(info_file_path):
+            with open(info_file_path, "r") as info_file:
+                okta_info = info_file.read()
+            if okta_info == "":
+                okta_info = {}
+            else:
+                okta_info = json.loads(okta_info)
 
-            last_updated = role_updated.get("last_updated", "0001-01-01")
-            last_updated = datetime.strptime(last_updated, "%Y-%m-%d").date()
-            current_date = date.today()
-            alias_age = current_date - last_updated
-            if alias_age.days >= 7 or alias is None:
-                self.logger.info("Refreshing cached alias for role %s" % role.role_arn)
-                alias = self.__get_account_alias(
-                    role.role_arn, role.principal_arn, assertion
+            role_info = []
+            new_okta_info = {}
+            for role in roles:
+                # read the role info from ~/.okta-info.json
+                role_updated = okta_info.get(role.role_arn, {})
+                alias = role_updated.get("alias")
+
+                last_updated = role_updated.get("last_updated", "0001-01-01")
+                last_updated = datetime.strptime(last_updated, "%Y-%m-%d").date()
+                current_date = date.today()
+                alias_age = current_date - last_updated
+                if alias_age.days >= 7 or alias is None:
+                    self.logger.info("Refreshing cached alias for role %s" % role.role_arn)
+                    alias = self.__get_account_alias(
+                        role.role_arn, role.principal_arn, assertion
+                    )
+                    last_updated = current_date
+                    if alias is None:
+                        continue
+
+                self.logger.info("Using cached alias for role %s" % role.role_arn)
+                role_info.append((role.role_arn, role.principal_arn, alias))
+                new_okta_info[role.role_arn] = {
+                    "last_updated": last_updated,
+                    "alias": alias,
+                }
+
+            with atomic_write(info_file_path) as info_file:
+                info_file.write(
+                    json.dumps(
+                        new_okta_info,
+                        sort_keys=True,
+                        indent=4,
+                        separators=(",", ": "),
+                        default=str,
+                    )
                 )
-                last_updated = current_date
-                if alias is None:
-                    continue
 
-            self.logger.info("Using cached alias for role %s" % role.role_arn)
-            role_info.append((role.role_arn, role.principal_arn, alias))
-            new_okta_info[role.role_arn] = {
-                "last_updated": last_updated,
-                "alias": alias,
-            }
-
-        info_file = open(info_file_path, "w")
-        info_file.write(
-            json.dumps(
-                new_okta_info,
-                sort_keys=True,
-                indent=4,
-                separators=(",", ": "),
-                default=str,
-            )
-        )
-        info_file.close()
-        role_info = sorted(role_info, key=lambda role: (role[2], role[0]))
-        return role_info
+        return sorted(role_info, key=lambda role: (role[2], role[0]))
 
     def __get_account_alias(self, role_arn, principal_arn, assertion):
         """

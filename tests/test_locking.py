@@ -292,3 +292,141 @@ class TestCopyToDefaultLocking(unittest.TestCase):
         self.assertIn("default", config.sections())
         self.assertEqual(config.get("default", "aws_access_key_id"), "AKIA_SRC")
         self.assertEqual(config.get("default", "aws_security_token"), "session_SRC")
+
+
+class TestGetRoleInfoLocking(unittest.TestCase):
+    """`AwsAuth.__get_role_info` acquires a lock on the okta-alias-info file."""
+
+    def setUp(self):
+        import json
+        from datetime import date
+
+        self.tempdir = tempfile.mkdtemp()
+        self._real_home = os.environ.get("HOME")
+        os.environ["HOME"] = self.tempdir
+        os.makedirs(os.path.join(self.tempdir, ".aws"))
+
+        # Pre-populate fresh cached aliases so the AWS-call branch is skipped.
+        info_path = os.path.join(self.tempdir, ".okta-alias-info")
+        with open(info_path, "w") as f:
+            json.dump(
+                {
+                    "arn:aws:iam::111:role/r1": {
+                        "alias": "acct-one",
+                        "last_updated": date.today().isoformat(),
+                    },
+                    "arn:aws:iam::222:role/r2": {
+                        "alias": "acct-two",
+                        "last_updated": date.today().isoformat(),
+                    },
+                },
+                f,
+                default=str,
+            )
+        self.info_path = info_path
+
+    def tearDown(self):
+        if self._real_home is not None:
+            os.environ["HOME"] = self._real_home
+        else:
+            os.environ.pop("HOME", None)
+        shutil.rmtree(self.tempdir)
+
+    def test_acquires_lock_on_alias_info_file(self):
+        from collections import namedtuple
+        import logging
+        from unittest import mock
+
+        from oktaawscli.aws_auth import AwsAuth
+        from oktaawscli import _locking as locking_module
+
+        RoleTuple = namedtuple("RoleTuple", ["principal_arn", "role_arn"])
+        roles = [
+            RoleTuple("arn:aws:iam::111:saml-provider/p", "arn:aws:iam::111:role/r1"),
+            RoleTuple("arn:aws:iam::222:saml-provider/p", "arn:aws:iam::222:role/r2"),
+        ]
+        auth = AwsAuth(
+            profile="test",
+            okta_profile="default",
+            account=None,
+            verbose=False,
+            logger=logging.getLogger("test"),
+            region="us-east-1",
+            reset=False,
+        )
+
+        with mock.patch(
+            "oktaawscli.aws_auth.locked", wraps=locking_module.locked
+        ) as mock_locked:
+            # Name-mangled access to the private method.
+            auth._AwsAuth__get_role_info(roles, b"unused-because-cache-is-fresh")
+
+        mock_locked.assert_called_once_with(self.info_path)
+
+    def test_lock_is_held_across_get_account_alias_call(self):
+        """The lock spans __get_account_alias so parallel runs serialize cold-cache fetches."""
+        import json
+        import logging
+        from collections import namedtuple
+        from unittest import mock
+
+        from filelock import Timeout
+
+        from oktaawscli import _locking as locking_module
+        from oktaawscli.aws_auth import AwsAuth
+
+        # Overwrite setUp's fresh entries with a STALE one to force the AWS branch.
+        with open(self.info_path, "w") as f:
+            json.dump(
+                {
+                    "arn:aws:iam::333:role/r3": {
+                        "alias": "old-alias",
+                        "last_updated": "2000-01-01",
+                    },
+                },
+                f,
+                default=str,
+            )
+
+        RoleTuple = namedtuple("RoleTuple", ["principal_arn", "role_arn"])
+        roles = [
+            RoleTuple("arn:aws:iam::333:saml-provider/p", "arn:aws:iam::333:role/r3"),
+        ]
+        auth = AwsAuth(
+            profile="test",
+            okta_profile="default",
+            account=None,
+            verbose=False,
+            logger=logging.getLogger("test"),
+            region="us-east-1",
+            reset=False,
+        )
+
+        timed_out = []
+
+        def fake_alias(*args, **kwargs):
+            # Inside __get_role_info's locked block; try to grab the same lock.
+            # If the outer lock is held, this attempt times out — proof of invariant.
+            try:
+                with locking_module.locked(self.info_path, timeout=0.2):
+                    timed_out.append(False)
+            except Timeout:
+                timed_out.append(True)
+            return "fresh-alias"
+
+        with mock.patch.object(
+            auth, "_AwsAuth__get_account_alias", side_effect=fake_alias
+        ):
+            result = auth._AwsAuth__get_role_info(roles, b"unused")
+
+        self.assertEqual(timed_out, [True])
+        self.assertEqual(
+            result,
+            [
+                (
+                    "arn:aws:iam::333:role/r3",
+                    "arn:aws:iam::333:saml-provider/p",
+                    "fresh-alias",
+                )
+            ],
+        )
