@@ -51,7 +51,7 @@ class TestLockingTimeout(unittest.TestCase):
         target = os.path.join(self.tempdir, "data.txt")
         ready = os.path.join(self.tempdir, "ready")
         ctx = multiprocessing.get_context("fork")
-        proc = ctx.Process(target=_hold_lock, args=(target + ".lock", ready, 3))
+        proc = ctx.Process(target=_hold_lock, args=(target + ".lock", ready, 1))
         proc.start()
         try:
             deadline = time.time() + 5
