@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.14] 2026-05-13
+### Changed
+- Version bump only. Republish of 0.4.13 — the 0.4.13 deploy build failed with HTTP 409 from CodeArtifact because that version had already been published from an earlier in-PR build.
+
 ## [0.4.13] 2026-05-11
 ### Changed
 - Cross-process file locking and atomic-rename writes for `~/.aws/credentials`, `~/.okta-aws`, and `~/.okta-alias-info`. Multiple `okta-awscli` processes can now run in parallel against the same dotfiles without clobbering each other.
