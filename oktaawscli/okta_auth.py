@@ -1,6 +1,7 @@
 """ Handles auth to Okta and returns SAML assertion """
 # pylint: disable=C0325,R0912,C1801
 import os
+import random
 import sys
 import time
 import json
@@ -8,6 +9,12 @@ from datetime import datetime
 import requests
 
 from bs4 import BeautifulSoup as bs
+
+from oktaawscli._locking import INTERACTIVE_LOCK_TIMEOUT_SECONDS, atomic_write, locked
+
+MAX_OKTA_RATE_LIMIT_RETRIES = 5
+OKTA_RATE_LIMIT_BACKOFF_BASE_SECONDS = 1.0
+OKTA_REQUEST_TIMEOUT_SECONDS = 30
 
 try:
     input = input
@@ -32,59 +39,61 @@ class OktaAuth:
         self.app = okta_auth_config.app_for(okta_profile)
         self.debug = debug
 
-        okta_info = os.path.join(os.path.expanduser("~"), ".okta-token")
-        if not os.path.isfile(okta_info):
-            open(okta_info, "a").close()
+        self.token_path = os.path.join(os.path.expanduser("~"), ".okta-token")
+        if not os.path.isfile(self.token_path):
+            open(self.token_path, "a").close()
 
     def primary_auth(self):
-        """Performs primary auth against Okta"""
-        # check if token is valid
+        """Performs primary auth against Okta, serializing parallel runs through a lock."""
         session_id = self.get_cached_session_id()
-        if session_id is not None:
-            # if there's no remote-local desync, return the cached token
-            if self.check_for_desync(session_id) is False:
-                return session_id
-            else:
-                self.logger.warning("Current Okta session was invalidated. Refreshing token now...")
+        if session_id is not None and not self.check_for_desync(session_id):
+            return session_id
+
+        # 300s timeout accommodates interactive MFA in the holding process.
+        with locked(self.token_path, timeout=INTERACTIVE_LOCK_TIMEOUT_SECONDS):
+            refreshed = self.get_cached_session_id()
+            if refreshed is not None and refreshed != session_id:
+                self.logger.info(
+                    "Cached Okta session was refreshed by another process; using it."
+                )
+                return refreshed
+            return self.get_session(self._run_authn_flow())
+
+    def _run_authn_flow(self):
+        """Runs the Okta authn POST and returns a sessionToken. Caller holds the lock."""
+        self.logger.warning(
+            "Cached Okta session is missing or invalid. Authenticating now..."
+        )
         auth_data = {
             "username": self.okta_auth_config.username_for(self.okta_profile),
             "password": self.okta_auth_config.password_for(self.okta_profile),
         }
         # https://developer.okta.com/docs/reference/api/authn/
-        resp = requests.post(self.https_base_url + "/api/v1/authn", json=auth_data)
-        resp_json = resp.json()
+        resp_json = self._okta_json_request("POST", "/api/v1/authn", "_run_authn_flow", json=auth_data)
         if "status" in resp_json:
-            if resp_json["status"] == "MFA_REQUIRED":
-                factors_list = resp_json["_embedded"]["factors"]
-                state_token = resp_json["stateToken"]
-                session_token = self.verify_mfa(factors_list, state_token)
-            elif resp_json["status"] == "SUCCESS":
-                session_token = resp_json["sessionToken"]
-            elif resp_json["status"] == "MFA_ENROLL":
+            status = resp_json["status"]
+            if status == "MFA_REQUIRED":
+                return self.verify_mfa(
+                    resp_json["_embedded"]["factors"], resp_json["stateToken"]
+                )
+            if status == "SUCCESS":
+                return resp_json["sessionToken"]
+            if status == "MFA_ENROLL":
                 self.logger.warning(
                     """MFA not enrolled. Cannot continue.
                 Please enroll an MFA factor in the Okta Web UI first!"""
                 )
                 sys.exit(2)
-            elif resp_json["status"] == "LOCKED_OUT":
+            if status == "LOCKED_OUT":
                 self.logger.error(
                     """Account is locked. Cannot continue.
                 Please contact you administrator in order to unlock the account!"""
                 )
                 sys.exit(1)
-            else:
-                self.logger.error(
-                    f"Unknown authentication status: {resp_json['status']}"
-                )
-                sys.exit(1)
-        elif resp.status_code != 200:
-            self.logger.error(resp_json["errorSummary"])
-            exit(1)
-        else:
-            self.logger.error(resp_json)
-            exit(1)
-
-        return self.get_session(session_token)
+            self.logger.error(f"Unknown authentication status: {status}")
+            sys.exit(1)
+        self.logger.error(resp_json)
+        exit(1)
 
     def verify_mfa(self, factors_list, state_token):
         """Performs MFA auth against Okta"""
@@ -194,33 +203,29 @@ class OktaAuth:
         """Gets a session cookie from a session token"""
         data = {"sessionToken": session_token}
         # https://developer.okta.com/docs/guides/ie-limitations/main/#sessions-apis
-        resp = requests.post(self.https_base_url + "/api/v1/sessions", json=data).json()
+        resp = self._okta_json_request("POST", "/api/v1/sessions", "get_session", json=data)
         self.cache_session_id(resp["id"], resp["expiresAt"])
         return resp["id"]
 
     def cache_session_id(self, session_id, expiration_date):
         """Stores Okta session id in ~/.okta-token"""
         session_info = {"session_id": session_id, "expiration_date": expiration_date}
-        session_path = os.path.join(os.path.expanduser("~"), ".okta-token")
         self.logger.info("Cacheing Okta session id to ~/.okta-token")
-        session_file = open(session_path, "w")
-        session_file.write(
-            json.dumps(
-                session_info,
-                sort_keys=True,
-                indent=4,
-                separators=(",", ": "),
-                default=str,
+        with atomic_write(self.token_path) as session_file:
+            session_file.write(
+                json.dumps(
+                    session_info,
+                    sort_keys=True,
+                    indent=4,
+                    separators=(",", ": "),
+                    default=str,
+                )
             )
-        )
-        session_file.close()
 
     def get_cached_session_id(self):
         """Gets Okta session id from ~/.okta-token if valid"""
-        session_path = os.path.join(os.path.expanduser("~"), ".okta-token")
-        session_file = open(session_path, "r")
-        session_info = session_file.read()
-        session_file.close()
+        with open(self.token_path, "r") as session_file:
+            session_info = session_file.read()
         if session_info == "":
             session_info = {}
         else:
@@ -256,15 +261,57 @@ class OktaAuth:
             self.logger.error(message)
             return True
 
+    def _okta_json_request(self, method, path, context, **kwargs):
+        """Issue an HTTP request against https_base_url + path, retrying on Okta rate-limit.
+
+        Returns parsed JSON for non-error responses. Exits 1 on a non-rate-limit
+        Okta error body or after exhausting retries.
+        """
+        url = self.https_base_url + path
+        kwargs.setdefault("timeout", OKTA_REQUEST_TIMEOUT_SECONDS)
+        for attempt in range(MAX_OKTA_RATE_LIMIT_RETRIES):
+            resp = requests.request(method, url, **kwargs)
+            body = resp.json()
+            if isinstance(body, dict) and body.get("errorCode") == "E0000047":
+                delay = OKTA_RATE_LIMIT_BACKOFF_BASE_SECONDS * (2 ** attempt)
+                delay += random.uniform(0, delay)
+                self.logger.warning(
+                    "Okta rate-limited in %s; retrying in %.1fs (attempt %d/%d)",
+                    context, delay, attempt + 1, MAX_OKTA_RATE_LIMIT_RETRIES,
+                )
+                time.sleep(delay)
+                continue
+            self._exit_on_okta_error(body, context)
+            return body
+        self.logger.error(
+            "Okta API still rate-limited in %s after %d retries; giving up.",
+            context,
+            MAX_OKTA_RATE_LIMIT_RETRIES,
+        )
+        sys.exit(1)
+
+    def _exit_on_okta_error(self, resp_body, context):
+        """Exit cleanly if the parsed JSON body is an Okta error response.
+
+        Okta error bodies are dicts with an `errorCode` key. List-shaped responses
+        (the success shape for endpoints like appLinks) skip the check.
+        """
+        if isinstance(resp_body, dict) and resp_body.get("errorCode"):
+            self.logger.error(
+                "Okta API error in %s: %s (errorCode=%s, errorId=%s)",
+                context,
+                resp_body.get("errorSummary", "<no summary>"),
+                resp_body["errorCode"],
+                resp_body.get("errorId", "<no id>"),
+            )
+            sys.exit(1)
 
     def get_apps(self, session_id):
         """Gets apps for the user"""
         sid = "sid=%s" % session_id
         headers = {"Cookie": sid}
         # https://developer.okta.com/docs/api/openapi/okta-management/management/tag/UserResources/#tag/UserResources/operation/listAppLinks
-        resp = requests.get(
-            self.https_base_url + "/api/v1/users/me/appLinks", headers=headers
-        ).json()
+        resp = self._okta_json_request("GET", "/api/v1/users/me/appLinks", "get_apps", headers=headers)
 
         aws_apps = []
         for app in resp:

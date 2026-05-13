@@ -11,6 +11,8 @@ import boto3
 from botocore.exceptions import ClientError, NoCredentialsError, ProfileNotFound
 import six
 
+from oktaawscli._locking import atomic_write, locked
+
 
 class AwsAuth:
     """Methods to support AWS authentication using STS"""
@@ -166,23 +168,22 @@ of roles assigned to you."""
         output = "json"
         if not os.path.exists(self.creds_dir):
             os.makedirs(self.creds_dir)
-        config = ConfigParser()
 
-        if os.path.isfile(self.creds_file):
-            config.read(self.creds_file)
+        with locked(self.creds_file):
+            config = ConfigParser()
+            if os.path.isfile(self.creds_file):
+                config.read(self.creds_file)
+            if not config.has_section(profile):
+                config.add_section(profile)
+            config.set(profile, "output", output)
+            config.set(profile, "region", region)
+            config.set(profile, "aws_access_key_id", access_key_id)
+            config.set(profile, "aws_secret_access_key", secret_access_key)
+            config.set(profile, "aws_session_token", session_token)
+            config.set(profile, "aws_security_token", session_token)
+            with atomic_write(self.creds_file) as configfile:
+                config.write(configfile)
 
-        if not config.has_section(profile):
-            config.add_section(profile)
-
-        config.set(profile, "output", output)
-        config.set(profile, "region", region)
-        config.set(profile, "aws_access_key_id", access_key_id)
-        config.set(profile, "aws_secret_access_key", secret_access_key)
-        config.set(profile, "aws_session_token", session_token)
-        config.set(profile, "aws_security_token", session_token)
-
-        with open(self.creds_file, "w+") as configfile:
-            config.write(configfile)
         print("Temporary credentials written to profile: %s" % profile)
         self.logger.info("Invoke using: aws --profile %s <service> <command>" % profile)
 
@@ -190,46 +191,29 @@ of roles assigned to you."""
         """Reads STS auth information from credentials file"""
         if not os.path.exists(self.creds_dir):
             os.makedirs(self.creds_dir)
-        config = ConfigParser()
 
-        if os.path.isfile(self.creds_file):
-            config.read(self.creds_file)
+        with locked(self.creds_file):
+            config = ConfigParser()
+            if os.path.isfile(self.creds_file):
+                config.read(self.creds_file)
+            if not config.has_section(profile):
+                config.add_section(profile)
+            if not config.has_section("default"):
+                config.add_section("default")
 
-        if not config.has_section(profile):
-            config.add_section(profile)
-
-        if config.has_option(profile, "output"):
-            config.set("default", "output", config.get(profile, "output"))
-
-        if config.has_option(profile, "region"):
-            config.set("default", "region", config.get(profile, "region"))
-
-        if config.has_option(profile, "aws_access_key_id"):
-            config.set(
-                "default", "aws_access_key_id", config.get(profile, "aws_access_key_id")
-            )
-
-        if config.has_option(profile, "aws_secret_access_key"):
-            config.set(
-                "default",
+            for key in (
+                "output",
+                "region",
+                "aws_access_key_id",
                 "aws_secret_access_key",
-                config.get(profile, "aws_secret_access_key"),
-            )
-
-        if config.has_option(profile, "aws_session_token"):
-            config.set(
-                "default", "aws_session_token", config.get(profile, "aws_session_token")
-            )
-
-        if config.has_option(profile, "aws_security_token"):
-            config.set(
-                "default",
+                "aws_session_token",
                 "aws_security_token",
-                config.get(profile, "aws_security_token"),
-            )
+            ):
+                if config.has_option(profile, key):
+                    config.set("default", key, config.get(profile, key))
 
-        with open(self.creds_file, "w+") as configfile:
-            config.write(configfile)
+            with atomic_write(self.creds_file) as configfile:
+                config.write(configfile)
 
     @staticmethod
     def __extract_available_roles_from(assertion):
@@ -249,54 +233,54 @@ of roles assigned to you."""
     def __get_role_info(self, roles, assertion):
         """Gets role info from okta-info.json"""
         info_file_path = os.path.expanduser("~") + "/.okta-alias-info"
-        info_file = open(info_file_path, "r")
-        okta_info = info_file.read()
-        if okta_info == "":
-            okta_info = {}
-        else:
-            okta_info = json.loads(okta_info)
-        info_file.close()
 
-        role_info = []
-        new_okta_info = {}
-        for role in roles:
-            # read the role info from ~/.okta-info.json
-            role_updated = okta_info.get(role.role_arn, {})
-            alias = role_updated.get("alias")
+        with locked(info_file_path):
+            with open(info_file_path, "r") as info_file:
+                okta_info = info_file.read()
+            if okta_info == "":
+                okta_info = {}
+            else:
+                okta_info = json.loads(okta_info)
 
-            last_updated = role_updated.get("last_updated", "0001-01-01")
-            last_updated = datetime.strptime(last_updated, "%Y-%m-%d").date()
-            current_date = date.today()
-            alias_age = current_date - last_updated
-            if alias_age.days >= 7 or alias is None:
-                self.logger.info("Refreshing cached alias for role %s" % role.role_arn)
-                alias = self.__get_account_alias(
-                    role.role_arn, role.principal_arn, assertion
+            role_info = []
+            new_okta_info = {}
+            for role in roles:
+                # read the role info from ~/.okta-info.json
+                role_updated = okta_info.get(role.role_arn, {})
+                alias = role_updated.get("alias")
+
+                last_updated = role_updated.get("last_updated", "0001-01-01")
+                last_updated = datetime.strptime(last_updated, "%Y-%m-%d").date()
+                current_date = date.today()
+                alias_age = current_date - last_updated
+                if alias_age.days >= 7 or alias is None:
+                    self.logger.info("Refreshing cached alias for role %s" % role.role_arn)
+                    alias = self.__get_account_alias(
+                        role.role_arn, role.principal_arn, assertion
+                    )
+                    last_updated = current_date
+                    if alias is None:
+                        continue
+
+                self.logger.info("Using cached alias for role %s" % role.role_arn)
+                role_info.append((role.role_arn, role.principal_arn, alias))
+                new_okta_info[role.role_arn] = {
+                    "last_updated": last_updated,
+                    "alias": alias,
+                }
+
+            with atomic_write(info_file_path) as info_file:
+                info_file.write(
+                    json.dumps(
+                        new_okta_info,
+                        sort_keys=True,
+                        indent=4,
+                        separators=(",", ": "),
+                        default=str,
+                    )
                 )
-                last_updated = current_date
-                if alias is None:
-                    continue
 
-            self.logger.info("Using cached alias for role %s" % role.role_arn)
-            role_info.append((role.role_arn, role.principal_arn, alias))
-            new_okta_info[role.role_arn] = {
-                "last_updated": last_updated,
-                "alias": alias,
-            }
-
-        info_file = open(info_file_path, "w")
-        info_file.write(
-            json.dumps(
-                new_okta_info,
-                sort_keys=True,
-                indent=4,
-                separators=(",", ": "),
-                default=str,
-            )
-        )
-        info_file.close()
-        role_info = sorted(role_info, key=lambda role: (role[2], role[0]))
-        return role_info
+        return sorted(role_info, key=lambda role: (role[2], role[0]))
 
     def __get_account_alias(self, role_arn, principal_arn, assertion):
         """

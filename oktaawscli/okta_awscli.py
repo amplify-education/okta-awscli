@@ -4,6 +4,7 @@ import os
 from subprocess import call
 import logging
 import click
+from filelock import Timeout
 from oktaawscli.version import __version__
 from oktaawscli.okta_auth import OktaAuth
 from oktaawscli.okta_auth_config import OktaAuthConfig
@@ -240,21 +241,30 @@ def main(
         okta_profile = account
     if region:
         logger.debug("Overwriting region to be %s", region)
-    get_credentials(
-        okta_profile,
-        profile,
-        account,
-        write_default,
-        verbose,
-        logger,
-        token,
-        cache,
-        export,
-        reset,
-        force,
-        region,
-        debug=debug,
-    )
+    try:
+        get_credentials(
+            okta_profile,
+            profile,
+            account,
+            write_default,
+            verbose,
+            logger,
+            token,
+            cache,
+            export,
+            reset,
+            force,
+            region,
+            debug=debug,
+        )
+    except Timeout as exc:
+        # Use print() so click's CliRunner captures the message in result.output;
+        # the logger writes to stderr which CliRunner doesn't capture by default.
+        print(
+            "Could not acquire lock on %s — another okta-awscli process is "
+            "holding it. Try again." % exc.lock_file
+        )
+        exit(1)
 
     if awscli_args:
         cmdline = ["aws", "--profile", profile] + list(awscli_args)
