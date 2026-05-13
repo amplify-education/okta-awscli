@@ -198,7 +198,6 @@ class TestCopyToDefaultLocking(_HomeIsolatedTestCase):
     def setUp(self):
         super().setUp()
         os.makedirs(os.path.join(self.tempdir, ".aws"))
-        # Pre-populate a profile so copy_to_default has something to copy
         creds_path = os.path.join(self.tempdir, ".aws", "credentials")
         with open(creds_path, "w") as f:
             f.write(
@@ -289,7 +288,6 @@ class TestGetRoleInfoLocking(_HomeIsolatedTestCase):
         with mock.patch(
             "oktaawscli.aws_auth.locked", wraps=locking_module.locked
         ) as mock_locked:
-            # Name-mangled access to the private method.
             auth._AwsAuth__get_role_info(roles, b"unused-because-cache-is-fresh")
 
         mock_locked.assert_called_once_with(self.info_path)
@@ -369,13 +367,10 @@ class TestSaveConfigValueMerge(_HomeIsolatedTestCase):
         from oktaawscli.okta_auth_config import OktaAuthConfig
 
         logger = logging.getLogger("test")
-        # Two instances both read the same baseline at construction.
         config_a = OktaAuthConfig(logger=logger, reset=False)
         config_b = OktaAuthConfig(logger=logger, reset=False)
 
-        # A saves a role; B's in-memory state is now stale relative to disk.
         config_a.save_chosen_role_for_profile("default", "arn:aws:iam::111:role/role_a")
-        # B saves a factor — must merge with A's role on disk, not clobber it.
         config_b.save_chosen_factor_for_profile("default", "push")
 
         parser = ConfigParser(default_section="default")
@@ -436,7 +431,6 @@ class TestCliTimeoutHandling(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 1)
         self.assertIn("/tmp/.aws/credentials.lock", result.output)
-        # Must NOT show a raw traceback — friendly handling required.
         self.assertNotIn("Traceback", result.output)
 
 
@@ -534,14 +528,8 @@ class TestPrimaryAuthLocking(_HomeIsolatedTestCase):
         from oktaawscli._locking import INTERACTIVE_LOCK_TIMEOUT_SECONDS
 
         auth = self._make_okta_auth()
-        # First read (outside lock): no session. Second read (inside lock): peer wrote one.
-        get_cached_calls = [None, "peer_refreshed_sid"]
-
-        def cached_side_effect():
-            return get_cached_calls.pop(0)
-
         with mock.patch.object(
-                auth, "get_cached_session_id", side_effect=cached_side_effect,
+                auth, "get_cached_session_id", side_effect=[None, "peer_refreshed_sid"],
              ) as mock_get_cached, \
              mock.patch.object(auth, "check_for_desync") as mock_desync, \
              mock.patch(
@@ -557,8 +545,6 @@ class TestPrimaryAuthLocking(_HomeIsolatedTestCase):
         )
         self.assertEqual(mock_get_cached.call_count, 2)
         mock_post.assert_not_called()
-        # The cache-changed optimization skips check_for_desync inside the lock,
-        # and the outside short-circuit avoids it when session_id is None.
         mock_desync.assert_not_called()
 
 
@@ -599,7 +585,6 @@ class TestOktaRateLimitRetry(_HomeIsolatedTestCase):
         # Pre-select the app so get_apps doesn't prompt for input.
         auth.app = "AWS Prod"
 
-        # First two calls rate-limited, third succeeds.
         responses = [
             self._rate_limit_response(),
             self._rate_limit_response(),
@@ -613,7 +598,6 @@ class TestOktaRateLimitRetry(_HomeIsolatedTestCase):
         self.assertEqual(label, "AWS Prod")
         self.assertEqual(link, "https://example.okta.com/aws-prod")
         self.assertEqual(mock_get.call_count, 3)
-        # Two backoff sleeps before the third (successful) attempt.
         self.assertEqual(mock_sleep.call_count, 2)
 
     def test_get_apps_exits_after_exhausting_retries(self):
