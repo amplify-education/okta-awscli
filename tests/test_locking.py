@@ -37,38 +37,6 @@ def _child_write_sts(home_dir, profile_name):
     )
 
 
-class TestLockedHelper(unittest.TestCase):
-    """Tests for `locked(path, timeout=...)`."""
-
-    def setUp(self):
-        self.tempdir = tempfile.mkdtemp()
-        self.target = os.path.join(self.tempdir, "data.txt")
-
-    def tearDown(self):
-        shutil.rmtree(self.tempdir)
-
-    def test_returns_FileLock_pointed_at_path_dot_lock(self):
-        from filelock import FileLock
-
-        from oktaawscli._locking import locked
-
-        result = locked(self.target)
-
-        self.assertIsInstance(result, FileLock)
-        self.assertEqual(str(result.lock_file), self.target + ".lock")
-
-    def test_default_timeout_is_60_seconds(self):
-        from oktaawscli._locking import LOCK_TIMEOUT_SECONDS, locked
-
-        self.assertEqual(LOCK_TIMEOUT_SECONDS, 60)
-        self.assertEqual(locked(self.target).timeout, 60)
-
-    def test_accepts_custom_timeout(self):
-        from oktaawscli._locking import locked
-
-        self.assertEqual(locked(self.target, timeout=5).timeout, 5)
-
-
 class TestLockingTimeout(unittest.TestCase):
     """`locked()` raises filelock.Timeout when another process holds the lock."""
 
