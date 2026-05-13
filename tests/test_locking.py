@@ -1,10 +1,10 @@
 """Tests for oktaawscli._locking."""
 import multiprocessing
 import os
-import shutil
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 def _hold_lock(lock_file_path, ready_path, hold_seconds):
@@ -41,12 +41,9 @@ class TestLockingTimeout(unittest.TestCase):
     """`locked()` raises filelock.Timeout when another process holds the lock."""
 
     def setUp(self):
-        self.tempdir = tempfile.mkdtemp()
+        self.tempdir = self.enterContext(tempfile.TemporaryDirectory())
 
-    def tearDown(self):
-        shutil.rmtree(self.tempdir)
-
-    def test_raises_Timeout_when_lock_held_by_another_process(self):
+    def test_raises_timeout_when_lock_held_by_another_process(self):
         from filelock import Timeout
 
         from oktaawscli._locking import locked
@@ -74,11 +71,8 @@ class TestAtomicWrite(unittest.TestCase):
     """`atomic_write(path)` replaces `path` only if the with-block exits cleanly."""
 
     def setUp(self):
-        self.tempdir = tempfile.mkdtemp()
+        self.tempdir = self.enterContext(tempfile.TemporaryDirectory())
         self.target = os.path.join(self.tempdir, "data.txt")
-
-    def tearDown(self):
-        shutil.rmtree(self.tempdir)
 
     def test_replaces_target_on_clean_exit(self):
         from oktaawscli._locking import atomic_write
@@ -116,23 +110,11 @@ class TestAtomicWrite(unittest.TestCase):
 
 
 class _HomeIsolatedTestCase(unittest.TestCase):
-    """Base class for tests that need an isolated $HOME pointing at a tempdir.
-
-    Subclasses must call `super().setUp()` and `super().tearDown()` if they
-    override either method. The tempdir path is available as `self.tempdir`.
-    """
+    """Base class for tests needing an isolated $HOME. Provides `self.tempdir`."""
 
     def setUp(self):
-        self.tempdir = tempfile.mkdtemp()
-        self._real_home = os.environ.get("HOME")
-        os.environ["HOME"] = self.tempdir
-
-    def tearDown(self):
-        if self._real_home is not None:
-            os.environ["HOME"] = self._real_home
-        else:
-            os.environ.pop("HOME", None)
-        shutil.rmtree(self.tempdir)
+        self.tempdir = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(mock.patch.dict(os.environ, {"HOME": self.tempdir}))
 
     def _make_okta_auth(self):
         """Build a minimally-wired OktaAuth bypassing __init__ for unit tests."""
@@ -152,21 +134,13 @@ class _HomeIsolatedTestCase(unittest.TestCase):
         auth.token_path = os.path.join(self.tempdir, ".okta-token")
         return auth
 
-
-class TestWriteStsTokenLocking(_HomeIsolatedTestCase):
-    """`AwsAuth.write_sts_token` acquires a lock on the credentials file."""
-
-    def setUp(self):
-        super().setUp()
-        os.makedirs(os.path.join(self.tempdir, ".aws"))
-
-    def _make_auth(self):
+    def _make_aws_auth(self, profile):
+        """Build a real AwsAuth pointed at the isolated $HOME."""
         import logging
-
         from oktaawscli.aws_auth import AwsAuth
 
         return AwsAuth(
-            profile="test_profile",
+            profile=profile,
             okta_profile="default",
             account=None,
             verbose=False,
@@ -175,12 +149,18 @@ class TestWriteStsTokenLocking(_HomeIsolatedTestCase):
             reset=False,
         )
 
-    def test_acquires_lock_on_credentials_file(self):
-        from unittest import mock
 
+class TestWriteStsTokenLocking(_HomeIsolatedTestCase):
+    """`AwsAuth.write_sts_token` acquires a lock on the credentials file."""
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.tempdir, ".aws"))
+
+    def test_acquires_lock_on_credentials_file(self):
         from oktaawscli import _locking as locking_module
 
-        auth = self._make_auth()
+        auth = self._make_aws_auth("test_profile")
         with mock.patch(
             "oktaawscli.aws_auth.locked", wraps=locking_module.locked
         ) as mock_locked:
@@ -231,28 +211,12 @@ class TestCopyToDefaultLocking(_HomeIsolatedTestCase):
                 "aws_security_token = session_SRC\n"
             )
 
-    def _make_auth(self):
-        import logging
-
-        from oktaawscli.aws_auth import AwsAuth
-
-        return AwsAuth(
-            profile="source",
-            okta_profile="default",
-            account=None,
-            verbose=False,
-            logger=logging.getLogger("test"),
-            region="us-east-1",
-            reset=False,
-        )
-
     def test_acquires_lock_on_credentials_file(self):
         from configparser import ConfigParser
-        from unittest import mock
 
         from oktaawscli import _locking as locking_module
 
-        auth = self._make_auth()
+        auth = self._make_aws_auth("source")
         with mock.patch(
             "oktaawscli.aws_auth.locked", wraps=locking_module.locked
         ) as mock_locked:
@@ -267,8 +231,7 @@ class TestCopyToDefaultLocking(_HomeIsolatedTestCase):
         """copy_to_default works against a file lacking a pre-existing [default] section."""
         from configparser import ConfigParser
 
-        auth = self._make_auth()
-        # The setUp credentials file has only [source], no [default] — verify that.
+        auth = self._make_aws_auth("source")
         pre = ConfigParser()
         pre.read(os.path.join(self.tempdir, ".aws", "credentials"))
         self.assertNotIn("default", pre.sections())
@@ -313,10 +276,7 @@ class TestGetRoleInfoLocking(_HomeIsolatedTestCase):
 
     def test_acquires_lock_on_alias_info_file(self):
         from collections import namedtuple
-        import logging
-        from unittest import mock
 
-        from oktaawscli.aws_auth import AwsAuth
         from oktaawscli import _locking as locking_module
 
         RoleTuple = namedtuple("RoleTuple", ["principal_arn", "role_arn"])
@@ -324,15 +284,7 @@ class TestGetRoleInfoLocking(_HomeIsolatedTestCase):
             RoleTuple("arn:aws:iam::111:saml-provider/p", "arn:aws:iam::111:role/r1"),
             RoleTuple("arn:aws:iam::222:saml-provider/p", "arn:aws:iam::222:role/r2"),
         ]
-        auth = AwsAuth(
-            profile="test",
-            okta_profile="default",
-            account=None,
-            verbose=False,
-            logger=logging.getLogger("test"),
-            region="us-east-1",
-            reset=False,
-        )
+        auth = self._make_aws_auth("test")
 
         with mock.patch(
             "oktaawscli.aws_auth.locked", wraps=locking_module.locked
@@ -345,16 +297,12 @@ class TestGetRoleInfoLocking(_HomeIsolatedTestCase):
     def test_lock_is_held_across_get_account_alias_call(self):
         """The lock spans __get_account_alias so parallel runs serialize cold-cache fetches."""
         import json
-        import logging
         from collections import namedtuple
-        from unittest import mock
 
         from filelock import Timeout
 
         from oktaawscli import _locking as locking_module
-        from oktaawscli.aws_auth import AwsAuth
 
-        # Overwrite setUp's fresh entries with a STALE one to force the AWS branch.
         with open(self.info_path, "w") as f:
             json.dump(
                 {
@@ -371,15 +319,7 @@ class TestGetRoleInfoLocking(_HomeIsolatedTestCase):
         roles = [
             RoleTuple("arn:aws:iam::333:saml-provider/p", "arn:aws:iam::333:role/r3"),
         ]
-        auth = AwsAuth(
-            profile="test",
-            okta_profile="default",
-            account=None,
-            verbose=False,
-            logger=logging.getLogger("test"),
-            region="us-east-1",
-            reset=False,
-        )
+        auth = self._make_aws_auth("test")
 
         timed_out = []
 
