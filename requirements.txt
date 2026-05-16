@@ -4,4 +4,3 @@ bs4
 boto3
 ConfigParser
 filelock
-six

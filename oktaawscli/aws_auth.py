@@ -1,15 +1,15 @@
-""" AWS authentication """
-# pylint: disable=C0325
-import os
-import json
+"""AWS authentication"""
+
 import base64
-from datetime import datetime, date
+import json
+import os
 import xml.etree.ElementTree as ET
 from collections import namedtuple
 from configparser import ConfigParser
+from datetime import date, datetime
+
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError, ProfileNotFound
-import six
 
 from oktaawscli._locking import atomic_write, locked
 
@@ -64,11 +64,8 @@ class AwsAuth:
                 self.logger.info("Using predefined role: %s" % self.role)
                 return predefined_role
             else:
-                self.logger.info(
-                    """Predefined role, %s, not found in the list
-of roles assigned to you."""
-                    % self.role
-                )
+                self.logger.info("""Predefined role, %s, not found in the list
+of roles assigned to you.""" % self.role)
                 self.logger.info("Please choose a role.")
 
         if len(roles) == 1:
@@ -82,7 +79,7 @@ of roles assigned to you."""
                 for option in role_options:
                     print(option)
                 role_choice = int(input("Please select the AWS role: ")) - 1
-                if role_choice >= 0 and role_choice < len(role_info):
+                if 0 <= role_choice < len(role_info):
                     return role_info[role_choice]
                 raise IndexError("Bad selection")
             except (SyntaxError, NameError, ValueError, IndexError):
@@ -254,7 +251,9 @@ of roles assigned to you."""
                 current_date = date.today()
                 alias_age = current_date - last_updated
                 if alias_age.days >= 7 or alias is None:
-                    self.logger.info("Refreshing cached alias for role %s" % role.role_arn)
+                    self.logger.info(
+                        "Refreshing cached alias for role %s" % role.role_arn
+                    )
                     alias = self.__get_account_alias(
                         role.role_arn, role.principal_arn, assertion
                     )
@@ -303,7 +302,7 @@ of roles assigned to you."""
             saml_resp = sts.assume_role_with_saml(
                 RoleArn=role_arn, PrincipalArn=principal_arn, SAMLAssertion=assertion
             )
-        except ClientError as ex:
+        except ClientError:
             self.logger.warning(
                 "Unable to assume role '%s', cannot get account alias",
                 role_arn,

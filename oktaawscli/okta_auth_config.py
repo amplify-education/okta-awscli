@@ -1,4 +1,4 @@
-""" Config helper """
+"""Config helper"""
 
 import os
 from configparser import ConfigParser
@@ -7,7 +7,7 @@ from getpass import getpass, getuser
 from oktaawscli._locking import atomic_write, locked
 
 try:
-    input = raw_input
+    input = raw_input  # type: ignore[name-defined]  # noqa: F821  # py2 compat
 except NameError:
     pass
 
