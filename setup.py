@@ -1,18 +1,10 @@
-import os
-import re
-
 from setuptools import find_packages, setup
 
-here = os.path.abspath(os.path.dirname(__file__))
-with open(os.path.join(here, "oktaawscli/version.py"), encoding="utf-8") as f:
-    match = re.search(r'__version__\s*=\s*"([^"]+)"', f.read())
-if match is None:
-    raise RuntimeError("Could not parse __version__ from oktaawscli/version.py")
-version = match.group(1)
+from oktaawscli.version import __version__
 
 setup(
     name="amplify-okta-awscli",
-    version=version,
+    version=__version__,
     description="Provides a wrapper for Okta authentication to awscli",
     packages=find_packages(),
     license="Apache License 2.0",

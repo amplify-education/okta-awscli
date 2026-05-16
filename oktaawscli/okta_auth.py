@@ -81,12 +81,16 @@ class OktaAuth:
             if status == "SUCCESS":
                 return resp_json["sessionToken"]
             if status == "MFA_ENROLL":
-                self.logger.warning("""MFA not enrolled. Cannot continue.
-                Please enroll an MFA factor in the Okta Web UI first!""")
+                self.logger.warning(
+                    "MFA not enrolled. Cannot continue. "
+                    "Please enroll an MFA factor in the Okta Web UI first!"
+                )
                 sys.exit(2)
             if status == "LOCKED_OUT":
-                self.logger.error("""Account is locked. Cannot continue.
-                Please contact you administrator in order to unlock the account!""")
+                self.logger.error(
+                    "Account is locked. Cannot continue. "
+                    "Please contact you administrator in order to unlock the account!"
+                )
                 sys.exit(1)
             self.logger.error(f"Unknown authentication status: {status}")
             sys.exit(1)
@@ -130,8 +134,9 @@ class OktaAuth:
                 if self.factor:
                     if self.factor == factor_provider:
                         factor_choice = index
-                        self.logger.info("Using pre-selected factor choice \
-                                         from ~/.okta-aws")
+                        self.logger.info(
+                            "Using pre-selected factor choice from ~/.okta-aws"
+                        )
                         break
                 else:
                     print("%d: %s" % (index + 1, factor_name))
@@ -325,8 +330,7 @@ class OktaAuth:
             if app["appName"] == "amazon_aws":
                 aws_apps.append(app)
         if not aws_apps:
-            self.logger.error("No AWS apps are available for your user. \
-                Exiting.")
+            self.logger.error("No AWS apps are available for your user. Exiting.")
             sys.exit(1)
 
         aws_apps = sorted(aws_apps, key=lambda app: app["sortOrder"])

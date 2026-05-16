@@ -64,8 +64,10 @@ class AwsAuth:
                 self.logger.info("Using predefined role: %s" % self.role)
                 return predefined_role
             else:
-                self.logger.info("""Predefined role, %s, not found in the list
-of roles assigned to you.""" % self.role)
+                self.logger.info(
+                    "Predefined role, %s, not found in the list of roles assigned to you."
+                    % self.role
+                )
                 self.logger.info("Please choose a role.")
 
         if len(roles) == 1:
