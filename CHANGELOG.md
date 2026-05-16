@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.15] 2026-05-16
+
+### Added
+
+- `.pre-commit-config.yaml` with the org-standard hooks (universal pre-commit-hooks set, yamllint/yamlfmt, mdformat, isort, black, mypy, pylint) and a single consolidated `PR check` workflow that runs pre-commit then tox on every PR.
+- Supporting configs: `.yamllint.yml`, `mypy.ini`, `pylintrc`.
+
+### Changed
+
+- Removed the unused `six` dependency from `requirements.txt`, `setup.py`, and `oktaawscli/aws_auth.py`.
+- `setup.py` now imports `__version__` directly from `oktaawscli.version` instead of `exec`-ing the source file.
+- Five legacy multi-line log strings in `aws_auth.py` and `okta_auth.py` are now single-line messages; the prior triple-quoted and backslash-continued forms were leaking embedded indentation into the user-visible output. Log content is otherwise unchanged.
+
 ## [0.4.14] 2026-05-13
 
 ### Changed
