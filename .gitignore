@@ -8,3 +8,4 @@ dist
 .tox/
 build/
 __pycache__/
+/docs/superpowers/
