@@ -1,9 +1,10 @@
+---
 language:
-- python
+  - python
 python:
-- "3.6.5"
+  - 3.6.5
 install:
-- pip install -r requirements.txt
-- pip install pylint
+  - pip install -r requirements.txt
+  - pip install pylint
 script:
-- pylint --errors-only oktaawscli
+  - pylint --errors-only oktaawscli

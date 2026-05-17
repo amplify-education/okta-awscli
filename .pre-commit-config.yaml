@@ -1,0 +1,64 @@
+---
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+default_language_version:
+  python: python3.11
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-symlinks
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: detect-private-key
+      - id: detect-aws-credentials
+        args: [--allow-missing-credentials]
+      - id: no-commit-to-branch
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        name: Lint YAML
+        args: [--format, parsable, --strict]
+  - repo: https://github.com/jumanjihouse/pre-commit-hook-yamlfmt
+    rev: 0.2.3
+    hooks:
+      - id: yamlfmt
+        args: [--mapping, '2', --sequence, '4', --offset, '2']
+  - repo: https://github.com/executablebooks/mdformat.git
+    rev: 1.0.0
+    hooks:
+      - id: mdformat
+        name: Format markdown
+  - repo: https://github.com/pycqa/isort
+    rev: 8.0.1
+    hooks:
+      - id: isort
+        name: isort (python)
+        args: [--profile, black, --filter-files]
+  - repo: https://github.com/psf/black
+    rev: 26.3.1
+    hooks:
+      - id: black
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        files: ^oktaawscli/
+        additional_dependencies:
+          - types-requests
+          - boto3-stubs[sts,iam]
+  - repo: https://github.com/pylint-dev/pylint
+    rev: v4.0.5
+    hooks:
+      - id: pylint
+        name: pylint (Python Linting)
+        files: ^(oktaawscli|tests)/
+        args: [--rcfile=pylintrc, --output-format=colorized, --score=no]

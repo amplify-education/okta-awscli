@@ -1,7 +1,6 @@
-from setuptools import setup, find_packages, os
+from setuptools import find_packages, setup
 
-here = os.path.abspath(os.path.dirname(__file__))
-exec(open(os.path.join(here, "oktaawscli/version.py")).read())
+from oktaawscli.version import __version__
 
 setup(
     name="amplify-okta-awscli",
@@ -17,5 +16,12 @@ setup(
             "okta-awscli=oktaawscli.okta_awscli:main",
         ],
     },
-    install_requires=["requests", "click", "bs4", "boto3", "ConfigParser", "six", "filelock"],
+    install_requires=[
+        "requests",
+        "click",
+        "bs4",
+        "boto3",
+        "ConfigParser",
+        "filelock",
+    ],
 )

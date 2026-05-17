@@ -5,6 +5,7 @@ Contributions are always welcome!
 We only ask that you follow the guidelines before before submitting your Pull Request.
 
 - Fork and then clone the repo:
+
 ```
 git clone git@github.com:your-username/okta-awscli.git
 ```
@@ -14,6 +15,7 @@ git clone git@github.com:your-username/okta-awscli.git
 It's highly recommended to use virtualenv!
 
 - Install the project from the repo, do not use the PyPi instructions in the README.
+
 ```
 pip install .
 ```

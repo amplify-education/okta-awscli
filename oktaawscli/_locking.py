@@ -1,4 +1,5 @@
 """Cross-process advisory locking and atomic writes for dotfiles."""
+
 import os
 import tempfile
 from contextlib import contextmanager

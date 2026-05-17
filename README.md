@@ -19,18 +19,16 @@ See [AstroTools: New Engineer Setup - Amplify Okta AWS CLI](https://docs.google.
 - Okta Verify Push Support
 - Google Authenticator [Play Store](https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2) | [App Store](https://itunes.apple.com/us/app/google-authenticator/id388497605)
 
-
 ## Unsupported Features
 
 - Per application MFA support
 
-
 ## Usage
 
 `okta-awscli --profile <aws_profile> <awscli action> <awscli arguments>`
+
 - Follow the prompts to enter MFA information (if required) and choose your AWS app and IAM role.
 - Multiple Okta profiles are supported, but if none are specified, then `default` will be used.
-
 
 ### Examples
 
@@ -38,12 +36,12 @@ See [AstroTools: New Engineer Setup - Amplify Okta AWS CLI](https://docs.google.
 
 This command will simply output STS credentials to `cfer-dev` in your credentials file.
 
-
 `okta-awscli --profile my-aws-account iam list-users`
 
 If no awscli commands are provided, then okta-awscli will simply output STS credentials to your credentials file, or console, depending on how `--profile` is set.
 
 Optional flags:
+
 - `--profile` Sets your temporary credentials to a profile in `.aws/credentials`. If omitted, credentials will output to console.
 - `--export` Outputs credentials to console instead of writing to ~/.aws/credentials.
 - `--reset` Resets default values in ~/.okta-aws for the okta-profile being used.

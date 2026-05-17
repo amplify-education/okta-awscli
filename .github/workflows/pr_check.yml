@@ -1,19 +1,37 @@
 ---
 name: PR check
 
-on:
+on:  # yamllint disable-line rule:truthy
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Merge base branch into PR branch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git fetch origin "$BASE_REF"
+          git merge "origin/$BASE_REF" --no-edit
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
+
+      - uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --all-files --show-diff-on-failure --color always
+
       - run: pip install tox
       - run: tox

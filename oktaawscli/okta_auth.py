@@ -1,13 +1,13 @@
-""" Handles auth to Okta and returns SAML assertion """
-# pylint: disable=C0325,R0912,C1801
+"""Handles auth to Okta and returns SAML assertion"""
+
+import json
 import os
 import random
 import sys
 import time
-import json
 from datetime import datetime
-import requests
 
+import requests
 from bs4 import BeautifulSoup as bs
 
 from oktaawscli._locking import INTERACTIVE_LOCK_TIMEOUT_SECONDS, atomic_write, locked
@@ -69,7 +69,9 @@ class OktaAuth:
             "password": self.okta_auth_config.password_for(self.okta_profile),
         }
         # https://developer.okta.com/docs/reference/api/authn/
-        resp_json = self._okta_json_request("POST", "/api/v1/authn", "_run_authn_flow", json=auth_data)
+        resp_json = self._okta_json_request(
+            "POST", "/api/v1/authn", "_run_authn_flow", json=auth_data
+        )
         if "status" in resp_json:
             status = resp_json["status"]
             if status == "MFA_REQUIRED":
@@ -80,14 +82,14 @@ class OktaAuth:
                 return resp_json["sessionToken"]
             if status == "MFA_ENROLL":
                 self.logger.warning(
-                    """MFA not enrolled. Cannot continue.
-                Please enroll an MFA factor in the Okta Web UI first!"""
+                    "MFA not enrolled. Cannot continue. "
+                    "Please enroll an MFA factor in the Okta Web UI first!"
                 )
                 sys.exit(2)
             if status == "LOCKED_OUT":
                 self.logger.error(
-                    """Account is locked. Cannot continue.
-                Please contact you administrator in order to unlock the account!"""
+                    "Account is locked. Cannot continue. "
+                    "Please contact you administrator in order to unlock the account!"
                 )
                 sys.exit(1)
             self.logger.error(f"Unknown authentication status: {status}")
@@ -133,8 +135,7 @@ class OktaAuth:
                     if self.factor == factor_provider:
                         factor_choice = index
                         self.logger.info(
-                            "Using pre-selected factor choice \
-                                         from ~/.okta-aws"
+                            "Using pre-selected factor choice from ~/.okta-aws"
                         )
                         break
                 else:
@@ -203,7 +204,9 @@ class OktaAuth:
         """Gets a session cookie from a session token"""
         data = {"sessionToken": session_token}
         # https://developer.okta.com/docs/guides/ie-limitations/main/#sessions-apis
-        resp = self._okta_json_request("POST", "/api/v1/sessions", "get_session", json=data)
+        resp = self._okta_json_request(
+            "POST", "/api/v1/sessions", "get_session", json=data
+        )
         self.cache_session_id(resp["id"], resp["expiresAt"])
         return resp["id"]
 
@@ -255,7 +258,11 @@ class OktaAuth:
             raw_resp.raise_for_status()
             return False
         except requests.HTTPError as e:
-            if e.response is None or e.response.status_code != 403 or "Invalid session" not in e.response.text:
+            if (
+                e.response is None
+                or e.response.status_code != 403
+                or "Invalid session" not in e.response.text
+            ):
                 raise e
             message = "Okta session invalidated. Refreshing token now..."
             self.logger.error(message)
@@ -273,11 +280,14 @@ class OktaAuth:
             resp = requests.request(method, url, **kwargs)
             body = resp.json()
             if isinstance(body, dict) and body.get("errorCode") == "E0000047":
-                delay = OKTA_RATE_LIMIT_BACKOFF_BASE_SECONDS * (2 ** attempt)
+                delay = OKTA_RATE_LIMIT_BACKOFF_BASE_SECONDS * (2**attempt)
                 delay += random.uniform(0, delay)
                 self.logger.warning(
                     "Okta rate-limited in %s; retrying in %.1fs (attempt %d/%d)",
-                    context, delay, attempt + 1, MAX_OKTA_RATE_LIMIT_RETRIES,
+                    context,
+                    delay,
+                    attempt + 1,
+                    MAX_OKTA_RATE_LIMIT_RETRIES,
                 )
                 time.sleep(delay)
                 continue
@@ -311,17 +321,16 @@ class OktaAuth:
         sid = "sid=%s" % session_id
         headers = {"Cookie": sid}
         # https://developer.okta.com/docs/api/openapi/okta-management/management/tag/UserResources/#tag/UserResources/operation/listAppLinks
-        resp = self._okta_json_request("GET", "/api/v1/users/me/appLinks", "get_apps", headers=headers)
+        resp = self._okta_json_request(
+            "GET", "/api/v1/users/me/appLinks", "get_apps", headers=headers
+        )
 
         aws_apps = []
         for app in resp:
             if app["appName"] == "amazon_aws":
                 aws_apps.append(app)
         if not aws_apps:
-            self.logger.error(
-                "No AWS apps are available for your user. \
-                Exiting."
-            )
+            self.logger.error("No AWS apps are available for your user. Exiting.")
             sys.exit(1)
 
         aws_apps = sorted(aws_apps, key=lambda app: app["sortOrder"])

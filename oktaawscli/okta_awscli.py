@@ -1,14 +1,17 @@
-""" Wrapper script for awscli which handles Okta auth """
-# pylint: disable=C0325,R0913,R0914
+"""Wrapper script for awscli which handles Okta auth"""
+
+import logging
 import os
 from subprocess import call
-import logging
+
 import click
 from filelock import Timeout
-from oktaawscli.version import __version__
+
+from oktaawscli.aws_auth import AwsAuth
 from oktaawscli.okta_auth import OktaAuth
 from oktaawscli.okta_auth_config import OktaAuthConfig
-from oktaawscli.aws_auth import AwsAuth
+from oktaawscli.version import __version__
+
 
 def get_credentials(
     okta_profile,
@@ -149,7 +152,6 @@ def console_output(access_key_id, secret_access_key, session_token, verbose):
     return exports
 
 
-# pylint: disable=R0913
 @click.command()
 @click.option("-v", "--verbose", is_flag=True, help="Enables verbose mode")
 @click.option(
@@ -164,9 +166,7 @@ def console_output(access_key_id, secret_access_key, session_token, verbose):
     help="Forces new STS credentials. \
 Skips STS credentials validation.",
 )
-@click.option(
-    "--reset", is_flag=True, help="Resets default values in ~/.okta-aws"
-)
+@click.option("--reset", is_flag=True, help="Resets default values in ~/.okta-aws")
 @click.option(
     "-e",
     "--export",
