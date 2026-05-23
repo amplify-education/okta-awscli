@@ -29,8 +29,15 @@ class AwsAuth:
         debug=False,
     ):
         home_dir = os.path.expanduser("~")
-        self.creds_dir = os.path.join(home_dir, ".aws")
-        self.creds_file = os.path.join(self.creds_dir, "credentials")
+        # Honor AWS_SHARED_CREDENTIALS_FILE so we write to the same location
+        # boto3 / the AWS CLI read from. AWS_CONFIG_FILE is intentionally not
+        # consulted: this tool only writes to the credentials file, never to
+        # ~/.aws/config.
+        self.creds_file = os.environ.get(
+            "AWS_SHARED_CREDENTIALS_FILE",
+            os.path.join(home_dir, ".aws", "credentials"),
+        )
+        self.creds_dir = os.path.dirname(self.creds_file)
         self.profile = profile
         self.account = account
         self.verbose = verbose
