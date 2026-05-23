@@ -1,25 +1,16 @@
 """Tests for AWS_SHARED_CREDENTIALS_FILE env-var support in AwsAuth."""
 
-import logging
 import os
 import tempfile
 import unittest
 from configparser import ConfigParser
 from unittest import mock
 
+from tests._helpers import make_aws_auth
+
 
 def _make_aws_auth(profile="test_profile"):
-    from oktaawscli.aws_auth import AwsAuth
-
-    return AwsAuth(
-        profile=profile,
-        okta_profile="default",
-        account=None,
-        verbose=False,
-        logger=logging.getLogger("test"),
-        region="us-east-1",
-        reset=False,
-    )
+    return make_aws_auth(profile)
 
 
 class TestCredsPathDefault(unittest.TestCase):

@@ -141,19 +141,9 @@ class _HomeIsolatedTestCase(unittest.TestCase):
 
     def _make_aws_auth(self, profile):
         """Build a real AwsAuth pointed at the isolated $HOME."""
-        import logging
+        from tests._helpers import make_aws_auth
 
-        from oktaawscli.aws_auth import AwsAuth
-
-        return AwsAuth(
-            profile=profile,
-            okta_profile="default",
-            account=None,
-            verbose=False,
-            logger=logging.getLogger("test"),
-            region="us-east-1",
-            reset=False,
-        )
+        return make_aws_auth(profile)
 
 
 class TestWriteStsTokenLocking(_HomeIsolatedTestCase):
