@@ -29,8 +29,12 @@ class AwsAuth:
         debug=False,
     ):
         home_dir = os.path.expanduser("~")
-        self.creds_dir = os.path.join(home_dir, ".aws")
-        self.creds_file = os.path.join(self.creds_dir, "credentials")
+        # https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+        self.creds_file = os.environ.get(
+            "AWS_SHARED_CREDENTIALS_FILE",
+            os.path.join(home_dir, ".aws", "credentials"),
+        )
+        self.creds_dir = os.path.dirname(self.creds_file)
         self.profile = profile
         self.account = account
         self.verbose = verbose

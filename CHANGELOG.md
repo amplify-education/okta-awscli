@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.16] 2026-05-22
+
+### Added
+
+- `AwsAuth` now honors the `AWS_SHARED_CREDENTIALS_FILE` environment variable when resolving the credentials write path, matching how boto3 and the AWS CLI locate the shared credentials file. Falls back to `~/.aws/credentials` when unset. `creds_dir` is derived from the resolved file's parent so directory creation works for any override path.
+
 ## [0.4.15] 2026-05-16
 
 ### Added
