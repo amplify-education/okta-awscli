@@ -157,9 +157,7 @@ class TestWriteStsTokenLocking(_HomeIsolatedTestCase):
         from oktaawscli import _locking as locking_module
 
         auth = self._make_aws_auth("test_profile")
-        with mock.patch(
-            "oktaawscli.aws_auth.locked", wraps=locking_module.locked
-        ) as mock_locked:
+        with mock.patch("oktaawscli.aws_auth.locked", wraps=locking_module.locked) as mock_locked:
             auth.write_sts_token(
                 "test_profile",
                 "AKIA_TEST",
@@ -172,10 +170,7 @@ class TestWriteStsTokenLocking(_HomeIsolatedTestCase):
         from configparser import ConfigParser
 
         ctx = multiprocessing.get_context("fork")
-        procs = [
-            ctx.Process(target=_child_write_sts, args=(self.tempdir, f"profile_{i}"))
-            for i in range(2)
-        ]
+        procs = [ctx.Process(target=_child_write_sts, args=(self.tempdir, f"profile_{i}")) for i in range(2)]
         for p in procs:
             p.start()
         for p in procs:
@@ -215,9 +210,7 @@ class TestCopyToDefaultLocking(_HomeIsolatedTestCase):
         from oktaawscli import _locking as locking_module
 
         auth = self._make_aws_auth("source")
-        with mock.patch(
-            "oktaawscli.aws_auth.locked", wraps=locking_module.locked
-        ) as mock_locked:
+        with mock.patch("oktaawscli.aws_auth.locked", wraps=locking_module.locked) as mock_locked:
             auth.copy_to_default("source")
 
         mock_locked.assert_called_once_with(auth.creds_file)
@@ -284,9 +277,7 @@ class TestGetRoleInfoLocking(_HomeIsolatedTestCase):
         ]
         auth = self._make_aws_auth("test")
 
-        with mock.patch(
-            "oktaawscli.aws_auth.locked", wraps=locking_module.locked
-        ) as mock_locked:
+        with mock.patch("oktaawscli.aws_auth.locked", wraps=locking_module.locked) as mock_locked:
             auth._AwsAuth__get_role_info(roles, b"unused-because-cache-is-fresh")
 
         mock_locked.assert_called_once_with(self.info_path)
@@ -330,9 +321,7 @@ class TestGetRoleInfoLocking(_HomeIsolatedTestCase):
                 timed_out.append(True)
             return "fresh-alias"
 
-        with mock.patch.object(
-            auth, "_AwsAuth__get_account_alias", side_effect=fake_alias
-        ):
+        with mock.patch.object(auth, "_AwsAuth__get_account_alias", side_effect=fake_alias):
             result = auth._AwsAuth__get_role_info(roles, b"unused")
 
         self.assertEqual(timed_out, [True])
@@ -399,14 +388,10 @@ class TestCacheSessionIdAtomicWrite(_HomeIsolatedTestCase):
 
         token_path = os.path.join(self.tempdir, ".okta-token")
         with open(token_path, "w") as f:
-            f.write(
-                '{"session_id": "original", "expiration_date": "2099-01-01T00:00:00.000Z"}'
-            )
+            f.write('{"session_id": "original", "expiration_date": "2099-01-01T00:00:00.000Z"}')
 
         auth = self._make_okta_auth()
-        with mock.patch(
-            "oktaawscli.okta_auth.json.dumps", side_effect=RuntimeError("boom")
-        ):
+        with mock.patch("oktaawscli.okta_auth.json.dumps", side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
                 auth.cache_session_id("new_sess", "2099-01-01T00:00:00.000Z")
 
@@ -454,9 +439,7 @@ class TestOktaApiErrorHandling(_HomeIsolatedTestCase):
         mock_resp = mock.MagicMock()
         mock_resp.json.return_value = error_response
         mock_resp.status_code = 401
-        with mock.patch(
-            "oktaawscli.okta_auth.requests.request", return_value=mock_resp
-        ):
+        with mock.patch("oktaawscli.okta_auth.requests.request", return_value=mock_resp):
             with self.assertRaises(SystemExit) as cm:
                 auth.get_apps("stale_sid")
         self.assertEqual(cm.exception.code, 1)
@@ -475,9 +458,7 @@ class TestOktaApiErrorHandling(_HomeIsolatedTestCase):
         mock_resp = mock.MagicMock()
         mock_resp.json.return_value = error_response
         mock_resp.status_code = 401
-        with mock.patch(
-            "oktaawscli.okta_auth.requests.request", return_value=mock_resp
-        ):
+        with mock.patch("oktaawscli.okta_auth.requests.request", return_value=mock_resp):
             with self.assertRaises(SystemExit) as cm:
                 auth.get_session("bad_session_token")
         self.assertEqual(cm.exception.code, 1)
@@ -490,11 +471,11 @@ class TestPrimaryAuthLocking(_HomeIsolatedTestCase):
         from unittest import mock
 
         auth = self._make_okta_auth()
-        with mock.patch.object(
-            auth, "get_cached_session_id", return_value="cached_sid"
-        ), mock.patch.object(auth, "check_for_desync", return_value=False), mock.patch(
-            "oktaawscli.okta_auth.locked"
-        ) as mock_locked:
+        with (
+            mock.patch.object(auth, "get_cached_session_id", return_value="cached_sid"),
+            mock.patch.object(auth, "check_for_desync", return_value=False),
+            mock.patch("oktaawscli.okta_auth.locked") as mock_locked,
+        ):
             result = auth.primary_auth()
         self.assertEqual(result, "cached_sid")
         mock_locked.assert_not_called()
@@ -514,22 +495,19 @@ class TestPrimaryAuthLocking(_HomeIsolatedTestCase):
         fake_resp.json.return_value = {"status": "SUCCESS", "sessionToken": "stoken"}
         fake_resp.status_code = 200
 
-        with mock.patch.object(
-            auth, "get_cached_session_id", return_value=None
-        ), mock.patch.object(
-            auth, "get_session", return_value="fresh_sid"
-        ) as mock_get_session, mock.patch(
-            "oktaawscli.okta_auth.locked",
-            wraps=locking_module.locked,
-        ) as mock_locked, mock.patch(
-            "oktaawscli.okta_auth.requests.request", return_value=fake_resp
+        with (
+            mock.patch.object(auth, "get_cached_session_id", return_value=None),
+            mock.patch.object(auth, "get_session", return_value="fresh_sid") as mock_get_session,
+            mock.patch(
+                "oktaawscli.okta_auth.locked",
+                wraps=locking_module.locked,
+            ) as mock_locked,
+            mock.patch("oktaawscli.okta_auth.requests.request", return_value=fake_resp),
         ):
             result = auth.primary_auth()
 
         self.assertEqual(result, "fresh_sid")
-        mock_locked.assert_called_once_with(
-            auth.token_path, timeout=INTERACTIVE_LOCK_TIMEOUT_SECONDS
-        )
+        mock_locked.assert_called_once_with(auth.token_path, timeout=INTERACTIVE_LOCK_TIMEOUT_SECONDS)
         mock_get_session.assert_called_once_with("stoken")
 
     def test_slow_path_uses_session_refreshed_by_peer_while_waiting(self):
@@ -540,24 +518,23 @@ class TestPrimaryAuthLocking(_HomeIsolatedTestCase):
         from oktaawscli._locking import INTERACTIVE_LOCK_TIMEOUT_SECONDS
 
         auth = self._make_okta_auth()
-        with mock.patch.object(
-            auth,
-            "get_cached_session_id",
-            side_effect=[None, "peer_refreshed_sid"],
-        ) as mock_get_cached, mock.patch.object(
-            auth, "check_for_desync"
-        ) as mock_desync, mock.patch(
-            "oktaawscli.okta_auth.locked",
-            wraps=locking_module.locked,
-        ) as mock_locked, mock.patch(
-            "oktaawscli.okta_auth.requests.request"
-        ) as mock_post:
+        with (
+            mock.patch.object(
+                auth,
+                "get_cached_session_id",
+                side_effect=[None, "peer_refreshed_sid"],
+            ) as mock_get_cached,
+            mock.patch.object(auth, "check_for_desync") as mock_desync,
+            mock.patch(
+                "oktaawscli.okta_auth.locked",
+                wraps=locking_module.locked,
+            ) as mock_locked,
+            mock.patch("oktaawscli.okta_auth.requests.request") as mock_post,
+        ):
             result = auth.primary_auth()
 
         self.assertEqual(result, "peer_refreshed_sid")
-        mock_locked.assert_called_once_with(
-            auth.token_path, timeout=INTERACTIVE_LOCK_TIMEOUT_SECONDS
-        )
+        mock_locked.assert_called_once_with(auth.token_path, timeout=INTERACTIVE_LOCK_TIMEOUT_SECONDS)
         self.assertEqual(mock_get_cached.call_count, 2)
         mock_post.assert_not_called()
         mock_desync.assert_not_called()
@@ -606,9 +583,10 @@ class TestOktaRateLimitRetry(_HomeIsolatedTestCase):
             self._success_apps_response(),
         ]
 
-        with mock.patch(
-            "oktaawscli.okta_auth.requests.request", side_effect=responses
-        ) as mock_get, mock.patch("oktaawscli.okta_auth.time.sleep") as mock_sleep:
+        with (
+            mock.patch("oktaawscli.okta_auth.requests.request", side_effect=responses) as mock_get,
+            mock.patch("oktaawscli.okta_auth.time.sleep") as mock_sleep,
+        ):
             label, link = auth.get_apps("sid")
 
         self.assertEqual(label, "AWS Prod")
@@ -622,10 +600,13 @@ class TestOktaRateLimitRetry(_HomeIsolatedTestCase):
         auth = self._make_okta_auth()
         auth.app = "AWS Prod"
 
-        with mock.patch(
-            "oktaawscli.okta_auth.requests.request",
-            return_value=self._rate_limit_response(),
-        ) as mock_get, mock.patch("oktaawscli.okta_auth.time.sleep"):
+        with (
+            mock.patch(
+                "oktaawscli.okta_auth.requests.request",
+                return_value=self._rate_limit_response(),
+            ) as mock_get,
+            mock.patch("oktaawscli.okta_auth.time.sleep"),
+        ):
             with self.assertRaises(SystemExit) as cm:
                 auth.get_apps("sid")
 
@@ -647,10 +628,10 @@ class TestOktaRateLimitRetry(_HomeIsolatedTestCase):
 
         responses = [self._rate_limit_response(), success]
 
-        with mock.patch(
-            "oktaawscli.okta_auth.requests.request", side_effect=responses
-        ) as mock_post, mock.patch.object(auth, "cache_session_id"), mock.patch(
-            "oktaawscli.okta_auth.time.sleep"
+        with (
+            mock.patch("oktaawscli.okta_auth.requests.request", side_effect=responses) as mock_post,
+            mock.patch.object(auth, "cache_session_id"),
+            mock.patch("oktaawscli.okta_auth.time.sleep"),
         ):
             sid = auth.get_session("stoken")
 
@@ -670,10 +651,13 @@ class TestOktaRateLimitRetry(_HomeIsolatedTestCase):
         }
         non_rate_limit_resp.status_code = 401
 
-        with mock.patch(
-            "oktaawscli.okta_auth.requests.request",
-            return_value=non_rate_limit_resp,
-        ) as mock_get, mock.patch("oktaawscli.okta_auth.time.sleep") as mock_sleep:
+        with (
+            mock.patch(
+                "oktaawscli.okta_auth.requests.request",
+                return_value=non_rate_limit_resp,
+            ) as mock_get,
+            mock.patch("oktaawscli.okta_auth.time.sleep") as mock_sleep,
+        ):
             with self.assertRaises(SystemExit):
                 auth.get_apps("sid")
 

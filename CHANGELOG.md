@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.17] 2026-07-16
+
+### Changed
+
+- Replaced `isort`, `black`, and `pylint` in `.pre-commit-config.yaml` with a single `ruff` hook (`ruff-check` + `ruff-format`), configured via `pyproject.toml` (`line-length = 120` matching the removed `pylintrc`, `select = ["E", "W", "F", "I"]`). Removed `pylintrc`. `mypy` is unchanged.
+
 ## [0.4.16] 2026-05-22
 
 ### Added

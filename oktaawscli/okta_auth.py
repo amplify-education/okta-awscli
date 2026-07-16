@@ -25,9 +25,7 @@ except NameError:
 class OktaAuth:
     """Handles auth to Okta and returns SAML assertion"""
 
-    def __init__(
-        self, okta_profile, verbose, logger, totp_token, okta_auth_config, debug=False
-    ):
+    def __init__(self, okta_profile, verbose, logger, totp_token, okta_auth_config, debug=False):
         self.okta_profile = okta_profile
         self.totp_token = totp_token
         self.logger = logger
@@ -53,37 +51,28 @@ class OktaAuth:
         with locked(self.token_path, timeout=INTERACTIVE_LOCK_TIMEOUT_SECONDS):
             refreshed = self.get_cached_session_id()
             if refreshed is not None and refreshed != session_id:
-                self.logger.info(
-                    "Cached Okta session was refreshed by another process; using it."
-                )
+                self.logger.info("Cached Okta session was refreshed by another process; using it.")
                 return refreshed
             return self.get_session(self._run_authn_flow())
 
     def _run_authn_flow(self):
         """Runs the Okta authn POST and returns a sessionToken. Caller holds the lock."""
-        self.logger.warning(
-            "Cached Okta session is missing or invalid. Authenticating now..."
-        )
+        self.logger.warning("Cached Okta session is missing or invalid. Authenticating now...")
         auth_data = {
             "username": self.okta_auth_config.username_for(self.okta_profile),
             "password": self.okta_auth_config.password_for(self.okta_profile),
         }
         # https://developer.okta.com/docs/reference/api/authn/
-        resp_json = self._okta_json_request(
-            "POST", "/api/v1/authn", "_run_authn_flow", json=auth_data
-        )
+        resp_json = self._okta_json_request("POST", "/api/v1/authn", "_run_authn_flow", json=auth_data)
         if "status" in resp_json:
             status = resp_json["status"]
             if status == "MFA_REQUIRED":
-                return self.verify_mfa(
-                    resp_json["_embedded"]["factors"], resp_json["stateToken"]
-                )
+                return self.verify_mfa(resp_json["_embedded"]["factors"], resp_json["stateToken"])
             if status == "SUCCESS":
                 return resp_json["sessionToken"]
             if status == "MFA_ENROLL":
                 self.logger.warning(
-                    "MFA not enrolled. Cannot continue. "
-                    "Please enroll an MFA factor in the Okta Web UI first!"
+                    "MFA not enrolled. Cannot continue. Please enroll an MFA factor in the Okta Web UI first!"
                 )
                 sys.exit(2)
             if status == "LOCKED_OUT":
@@ -134,9 +123,7 @@ class OktaAuth:
                 if self.factor:
                     if self.factor == factor_provider:
                         factor_choice = index
-                        self.logger.info(
-                            "Using pre-selected factor choice from ~/.okta-aws"
-                        )
+                        self.logger.info("Using pre-selected factor choice from ~/.okta-aws")
                         break
                 else:
                     print("%d: %s" % (index + 1, factor_name))
@@ -146,12 +133,9 @@ class OktaAuth:
                     self.okta_profile, supported_factors[factor_choice]["provider"]
                 )
             self.logger.info(
-                "Performing secondary authentication using: %s"
-                % supported_factors[factor_choice]["provider"]
+                "Performing secondary authentication using: %s" % supported_factors[factor_choice]["provider"]
             )
-            session_token = self.verify_single_factor(
-                supported_factors[factor_choice], state_token
-            )
+            session_token = self.verify_single_factor(supported_factors[factor_choice], state_token)
         else:
             print("MFA required, but no supported factors enrolled! Exiting.")
             exit(1)
@@ -178,9 +162,7 @@ class OktaAuth:
             elif resp_json["status"] == "MFA_CHALLENGE":
                 print("Waiting for push verification...")
                 while True:
-                    resp = requests.post(
-                        resp_json["_links"]["next"]["href"], json=req_data
-                    )
+                    resp = requests.post(resp_json["_links"]["next"]["href"], json=req_data)
                     resp_json = resp.json()
                     if resp_json["status"] == "SUCCESS":
                         return resp_json["sessionToken"]
@@ -204,9 +186,7 @@ class OktaAuth:
         """Gets a session cookie from a session token"""
         data = {"sessionToken": session_token}
         # https://developer.okta.com/docs/guides/ie-limitations/main/#sessions-apis
-        resp = self._okta_json_request(
-            "POST", "/api/v1/sessions", "get_session", json=data
-        )
+        resp = self._okta_json_request("POST", "/api/v1/sessions", "get_session", json=data)
         self.cache_session_id(resp["id"], resp["expiresAt"])
         return resp["id"]
 
@@ -236,9 +216,7 @@ class OktaAuth:
 
         expiration_date = datetime.min
         if session_info.get("expiration_date"):
-            expiration_date = datetime.strptime(
-                session_info.get("expiration_date"), "%Y-%m-%dT%H:%M:%S.%fZ"
-            )
+            expiration_date = datetime.strptime(session_info.get("expiration_date"), "%Y-%m-%dT%H:%M:%S.%fZ")
 
         current_time = datetime.utcnow()
         if max([current_time, expiration_date]) == expiration_date:
@@ -252,17 +230,11 @@ class OktaAuth:
             sid = "sid=%s" % session_id
             headers = {"Cookie": sid}
             # https://developer.okta.com/docs/api/openapi/okta-management/management/tag/User/#tag/User/operation/getUser
-            raw_resp = requests.get(
-                self.https_base_url + "/api/v1/users/me", headers=headers
-            )
+            raw_resp = requests.get(self.https_base_url + "/api/v1/users/me", headers=headers)
             raw_resp.raise_for_status()
             return False
         except requests.HTTPError as e:
-            if (
-                e.response is None
-                or e.response.status_code != 403
-                or "Invalid session" not in e.response.text
-            ):
+            if e.response is None or e.response.status_code != 403 or "Invalid session" not in e.response.text:
                 raise e
             message = "Okta session invalidated. Refreshing token now..."
             self.logger.error(message)
@@ -321,9 +293,7 @@ class OktaAuth:
         sid = "sid=%s" % session_id
         headers = {"Cookie": sid}
         # https://developer.okta.com/docs/api/openapi/okta-management/management/tag/UserResources/#tag/UserResources/operation/listAppLinks
-        resp = self._okta_json_request(
-            "GET", "/api/v1/users/me/appLinks", "get_apps", headers=headers
-        )
+        resp = self._okta_json_request("GET", "/api/v1/users/me/appLinks", "get_apps", headers=headers)
 
         aws_apps = []
         for app in resp:
@@ -342,9 +312,7 @@ class OktaAuth:
             print("%d: %s" % (index + 1, app["label"]))
         if app_choice is None:
             app_choice = int(input("Please select AWS app: ")) - 1
-            self.okta_auth_config.save_chosen_app_for_profile(
-                self.okta_profile, aws_apps[app_choice]["label"]
-            )
+            self.okta_auth_config.save_chosen_app_for_profile(self.okta_profile, aws_apps[app_choice]["label"])
 
         return aws_apps[app_choice]["label"], aws_apps[app_choice]["linkUrl"]
 

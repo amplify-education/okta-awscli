@@ -88,9 +88,7 @@ class OktaAuthConfig:
 
     def get_check_valid_creds(self, okta_profile):
         """Gets if should check if AWS creds are valid from config"""
-        check_valid_creds = self._value.get(
-            okta_profile, "check-valid-creds", fallback="True"
-        )
+        check_valid_creds = self._value.get(okta_profile, "check-valid-creds", fallback="True")
         self.logger.info("Check if credentials are valid: %s" % check_valid_creds)
         return check_valid_creds
 
@@ -102,25 +100,17 @@ class OktaAuthConfig:
 
     def get_auto_write_profile(self, okta_profile):
         """Gets if should auto write aws creds to ~/.aws/credentials from config"""
-        auto_write_profile = self._value.get(
-            okta_profile, "auto-write-profile", fallback=True
-        )
-        self.logger.info(
-            "Should write profile to ~/.aws/credentials: %s" % auto_write_profile
-        )
+        auto_write_profile = self._value.get(okta_profile, "auto-write-profile", fallback=True)
+        self.logger.info("Should write profile to ~/.aws/credentials: %s" % auto_write_profile)
         return auto_write_profile
 
     def get_session_duration(self, okta_profile):
         """Gets STS session duration from config as an int"""
         # AWS docs say default duration is 1 hour (3600 seconds)
-        session_duration = int(
-            self._value.get(okta_profile, "session-duration", fallback="3600")
-        )
+        session_duration = int(self._value.get(okta_profile, "session-duration", fallback="3600"))
 
         if session_duration > 43200 or session_duration < 3600:
-            self.logger.info(
-                "Invalid session duration specified, defaulting to 1 hour."
-            )
+            self.logger.info("Invalid session duration specified, defaulting to 1 hour.")
             session_duration = 3600
 
         self.logger.info("Configured session duration: %s seconds" % session_duration)

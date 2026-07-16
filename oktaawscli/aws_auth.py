@@ -68,10 +68,7 @@ class AwsAuth:
                 self.logger.info("Using predefined role: %s" % self.role)
                 return predefined_role
             else:
-                self.logger.info(
-                    "Predefined role, %s, not found in the list of roles assigned to you."
-                    % self.role
-                )
+                self.logger.info("Predefined role, %s, not found in the list of roles assigned to you." % self.role)
                 self.logger.info("Please choose a role.")
 
         if len(roles) == 1:
@@ -106,9 +103,7 @@ class AwsAuth:
             if profile is not None:
                 os.environ["AWS_PROFILE"] = profile
         except ProfileNotFound:
-            self.logger.exception(
-                "Unable to handle AWS_PROFILE=%s" % os.environ["AWS_PROFILE"]
-            )
+            self.logger.exception("Unable to handle AWS_PROFILE=%s" % os.environ["AWS_PROFILE"])
 
         response = sts.assume_role_with_saml(
             RoleArn=role_arn,
@@ -137,9 +132,7 @@ class AwsAuth:
             return False
 
         elif not parser.has_section(profile):
-            self.logger.info(
-                "No existing credentials found. Requesting new credentials."
-            )
+            self.logger.info("No existing credentials found. Requesting new credentials.")
             return False
 
         session = boto3.Session(profile_name=profile)
@@ -149,23 +142,17 @@ class AwsAuth:
 
         except (ClientError, NoCredentialsError) as ex:
             if str(ex) == "Unable to locate credentials":
-                self.logger.info(
-                    "No credentials have been located. Requesting new credentials."
-                )
+                self.logger.info("No credentials have been located. Requesting new credentials.")
                 return False
             elif ex.response["Error"]["Code"] == "ExpiredToken":
-                self.logger.info(
-                    "Temporary credentials have expired. Requesting new credentials."
-                )
+                self.logger.info("Temporary credentials have expired. Requesting new credentials.")
                 return False
 
         print("AWS credentials are valid. Nothing to do.")
         self.logger.info("STS credentials are valid. Nothing to do.")
         return True
 
-    def write_sts_token(
-        self, profile, access_key_id, secret_access_key, session_token, region=None
-    ):
+    def write_sts_token(self, profile, access_key_id, secret_access_key, session_token, region=None):
         """Writes STS auth information to credentials file"""
         region = region or self.region
         output = "json"
@@ -225,9 +212,7 @@ class AwsAuth:
         roles = []
         role_tuple = namedtuple("RoleTuple", ["principal_arn", "role_arn"])
         root = ET.fromstring(base64.b64decode(assertion))
-        for saml2attribute in root.iter(
-            "{urn:oasis:names:tc:SAML:2.0:assertion}Attribute"
-        ):
+        for saml2attribute in root.iter("{urn:oasis:names:tc:SAML:2.0:assertion}Attribute"):
             if saml2attribute.get("Name") == aws_attribute_role:
                 for saml2attributevalue in saml2attribute.iter(attribute_value_urn):
                     roles.append(role_tuple(*saml2attributevalue.text.split(",")))
@@ -257,12 +242,8 @@ class AwsAuth:
                 current_date = date.today()
                 alias_age = current_date - last_updated
                 if alias_age.days >= 7 or alias is None:
-                    self.logger.info(
-                        "Refreshing cached alias for role %s" % role.role_arn
-                    )
-                    alias = self.__get_account_alias(
-                        role.role_arn, role.principal_arn, assertion
-                    )
+                    self.logger.info("Refreshing cached alias for role %s" % role.role_arn)
+                    alias = self.__get_account_alias(role.role_arn, role.principal_arn, assertion)
                     last_updated = current_date
                     if alias is None:
                         continue
@@ -301,13 +282,9 @@ class AwsAuth:
         try:
             sts = boto3.client("sts")
         except ProfileNotFound:
-            self.logger.exception(
-                "Unable to handle AWS_PROFILE=%s" % os.environ["AWS_PROFILE"]
-            )
+            self.logger.exception("Unable to handle AWS_PROFILE=%s" % os.environ["AWS_PROFILE"])
         try:
-            saml_resp = sts.assume_role_with_saml(
-                RoleArn=role_arn, PrincipalArn=principal_arn, SAMLAssertion=assertion
-            )
+            saml_resp = sts.assume_role_with_saml(RoleArn=role_arn, PrincipalArn=principal_arn, SAMLAssertion=assertion)
         except ClientError:
             self.logger.warning(
                 "Unable to assume role '%s', cannot get account alias",
@@ -337,9 +314,7 @@ class AwsAuth:
                     exc_info=self.debug,
                 )
             else:
-                self.logger.exception(
-                    "Unknown Error. Unable to get account alias for role %s", role_arn
-                )
+                self.logger.exception("Unknown Error. Unable to get account alias for role %s", role_arn)
             return "unknown"
 
     @staticmethod
@@ -347,9 +322,7 @@ class AwsAuth:
         options = []
         for index, role in enumerate(roles):
             # role[0] is the role arn, role[2] is the account alias
-            options.append(
-                "[%s]: %s : %s" % (str(index + 1).ljust(2), role[2].ljust(27), role[0])
-            )
+            options.append("[%s]: %s : %s" % (str(index + 1).ljust(2), role[2].ljust(27), role[0]))
         return options
 
     def __find_predefined_role_from(self, roles):

@@ -25,9 +25,7 @@ class TestCredsPathDefault(unittest.TestCase):
 
     def test_creds_file_defaults_to_home_dot_aws_credentials(self):
         auth = _make_aws_auth()
-        self.assertEqual(
-            auth.creds_file, os.path.join(self.tempdir, ".aws", "credentials")
-        )
+        self.assertEqual(auth.creds_file, os.path.join(self.tempdir, ".aws", "credentials"))
         self.assertEqual(auth.creds_dir, os.path.join(self.tempdir, ".aws"))
 
 
@@ -64,9 +62,7 @@ class TestCredsPathEnvOverride(unittest.TestCase):
 
         self.assertTrue(os.path.isfile(self.override_path))
         # Default ~/.aws/credentials should NOT have been created.
-        self.assertFalse(
-            os.path.exists(os.path.join(self.tempdir, ".aws", "credentials"))
-        )
+        self.assertFalse(os.path.exists(os.path.join(self.tempdir, ".aws", "credentials")))
 
         config = ConfigParser()
         config.read(self.override_path)

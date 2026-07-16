@@ -49,9 +49,7 @@ def get_credentials(
             print("Copying AWS profile creds to default")
         exit(0)
 
-    okta = OktaAuth(
-        okta_profile, verbose, logger, totp_token, okta_auth_config, debug=debug
-    )
+    okta = OktaAuth(okta_profile, verbose, logger, totp_token, okta_auth_config, debug=debug)
     _, assertion = okta.get_assertion()
     role = aws_auth.choose_aws_role(assertion)
     role_arn, principal_arn, alias = role
@@ -73,12 +71,8 @@ def get_credentials(
     session_token = sts_token["SessionToken"]
     print("Credentials valid for %s hours" % round(duration / 3600, 1))
     if (profile_name is None or export) and not write_default:
-        logger.info(
-            "Either profile name not given or export flag set, will output to console."
-        )
-        exports = console_output(
-            access_key_id, secret_access_key, session_token, verbose
-        )
+        logger.info("Either profile name not given or export flag set, will output to console.")
+        exports = console_output(access_key_id, secret_access_key, session_token, verbose)
         if cache:
             cache = open("%s/.okta-credentials.cache" % (os.path.expanduser("~"),), "w")
             cache.write(exports)
@@ -97,16 +91,12 @@ def get_credentials(
             logger.debug("Setting region=%s via okta-profile=%s", region, okta_profile)
         elif account_region is not None and account_region != default_region:
             region = account_region
-            logger.debug(
-                "Setting region=%s via account profile=%s", region, profile_name
-            )
+            logger.debug("Setting region=%s via account profile=%s", region, profile_name)
         else:
             region = default_region
             logger.debug("Setting region=%s via defaults", region)
 
-        logger.info(
-            "Export flag not set, will write credentials to ~/.aws/credentials."
-        )
+        logger.info("Export flag not set, will write credentials to ~/.aws/credentials.")
         aws_auth.write_sts_token(
             profile=profile_name,
             access_key_id=access_key_id,
@@ -154,9 +144,7 @@ def console_output(access_key_id, secret_access_key, session_token, verbose):
 
 @click.command()
 @click.option("-v", "--verbose", is_flag=True, help="Enables verbose mode")
-@click.option(
-    "-w", "--write-default", is_flag=True, help="Writes to both default and account"
-)
+@click.option("-w", "--write-default", is_flag=True, help="Writes to both default and account")
 @click.option("-V", "--version", is_flag=True, help="Outputs version number and exits")
 @click.option("-d", "--debug", is_flag=True, help="Enables debug mode")
 @click.option(
@@ -260,10 +248,7 @@ def main(
     except Timeout as exc:
         # Use print() so click's CliRunner captures the message in result.output;
         # the logger writes to stderr which CliRunner doesn't capture by default.
-        print(
-            "Could not acquire lock on %s — another okta-awscli process is "
-            "holding it. Try again." % exc.lock_file
-        )
+        print("Could not acquire lock on %s — another okta-awscli process is holding it. Try again." % exc.lock_file)
         exit(1)
 
     if awscli_args:
