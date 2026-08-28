@@ -45,6 +45,7 @@ Optional flags:
 - `--profile` Sets your temporary credentials to a profile in `.aws/credentials`. If omitted, credentials will output to console.
 - `--export` Outputs credentials to console instead of writing to ~/.aws/credentials.
 - `--reset` Resets default values in ~/.okta-aws for the okta-profile being used.
+- `--reset-factor` Forces re-selection of the MFA factor, without resetting other cached values (base URL, app, etc.) like `--reset` does. Useful after enrolling a new MFA device.
 - `--force` Ignores result of STS credentials validation and gets new credentials from AWS. Used in conjunction with `--profile`.
 - `--verbose` More verbose output.
 - `--debug` Very verbose output. Useful for debugging.

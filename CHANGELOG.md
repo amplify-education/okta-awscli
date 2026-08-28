@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.17] 2026-08-28
+
+### Fixed
+
+- MFA factor selection now persists the chosen Okta factor's `id` (new `factor-id` key in `~/.okta-aws`) instead of just its `provider`. Previously, two enrolled factors of the same provider (e.g. two "Okta Verify - Push" entries after enrolling a new device) were indistinguishable once saved, so the tool could silently keep using a de-enrolled device's push factor. A stored `factor-id` no longer enrolled now falls back to a fresh prompt instead of crashing.
+- The interactive MFA prompt now shows each push factor's device name (e.g. `Okta Verify - Push (Pixel 11 Pro XL)`) when Okta provides one, and appends a short factor-id suffix to disambiguate any labels that would otherwise still collide.
+- `verify_single_factor`'s push-verification polling now goes through the same rate-limited, timeout-bounded request helper as other Okta API calls, so a malformed or rate-limited poll response can no longer crash the CLI with a `KeyError`.
+
+### Added
+
+- `--reset-factor` CLI flag: forces re-selection of the MFA factor without resetting other cached `~/.okta-aws` values (base URL, app, etc.) like `--reset` does. Useful right after enrolling a new MFA device. Bypasses both a still-valid cached `~/.okta-token` Okta session (and a concurrently-refreshed one) and a still-valid cached AWS STS credentials file, so the flag reliably reaches the MFA prompt instead of silently no-oping whenever either cache is warm.
+
+### Notes
+
+Existing `~/.okta-aws` files with only the legacy `factor` (provider) key keep working: on the next run, that value is silently migrated to `factor-id` if it still resolves to exactly one enrolled factor, otherwise the user is prompted once to disambiguate. Once a profile has a legacy `factor` value, it stays in sync with every future selection -- including under `--reset`/`--reset-factor`, where the sync must not be skipped just because those flags also suppress the legacy value for migration purposes -- so an older okta-awscli version, or a parallel install, reading the same config file sees a consistent choice. A profile that never had one is not retroactively given one.
+
 ## [0.4.16] 2026-05-22
 
 ### Added

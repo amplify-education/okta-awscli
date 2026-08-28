@@ -7,6 +7,8 @@ import time
 import unittest
 from unittest import mock
 
+from tests._helpers import HomeIsolatedTestCase as _HomeIsolatedTestCase
+
 
 def _hold_lock(lock_file_path, ready_path, hold_seconds):
     """Subprocess entry: acquire lock, signal ready by touching `ready_path`, hold."""
@@ -111,39 +113,6 @@ class TestAtomicWrite(unittest.TestCase):
 
         leftovers = [n for n in os.listdir(self.tempdir) if n.endswith(".tmp")]
         self.assertEqual(leftovers, [])
-
-
-class _HomeIsolatedTestCase(unittest.TestCase):
-    """Base class for tests needing an isolated $HOME. Provides `self.tempdir`."""
-
-    def setUp(self):
-        self.tempdir = self.enterContext(tempfile.TemporaryDirectory())
-        self.enterContext(mock.patch.dict(os.environ, {"HOME": self.tempdir}))
-
-    def _make_okta_auth(self):
-        """Build a minimally-wired OktaAuth bypassing __init__ for unit tests."""
-        import logging
-
-        from oktaawscli.okta_auth import OktaAuth
-
-        auth = OktaAuth.__new__(OktaAuth)
-        auth.logger = logging.getLogger("test")
-        auth.https_base_url = "https://example.okta.com"
-        auth.app = None
-        auth.okta_auth_config = None
-        auth.okta_profile = "default"
-        auth.totp_token = None
-        auth.factor = ""
-        auth.verbose = False
-        auth.debug = False
-        auth.token_path = os.path.join(self.tempdir, ".okta-token")
-        return auth
-
-    def _make_aws_auth(self, profile):
-        """Build a real AwsAuth pointed at the isolated $HOME."""
-        from tests._helpers import make_aws_auth
-
-        return make_aws_auth(profile)
 
 
 class TestWriteStsTokenLocking(_HomeIsolatedTestCase):
@@ -420,6 +389,95 @@ class TestCliTimeoutHandling(unittest.TestCase):
         self.assertEqual(result.exit_code, 1)
         self.assertIn("/tmp/.aws/credentials.lock", result.output)
         self.assertNotIn("Traceback", result.output)
+
+
+class TestCliResetFactorFlag(unittest.TestCase):
+    """The --reset-factor CLI flag reaches OktaAuthConfig via main()/get_credentials()."""
+
+    def _invoke(self, args):
+        from unittest import mock
+
+        from click.testing import CliRunner
+
+        from oktaawscli.okta_awscli import main
+
+        runner = CliRunner()
+        with (
+            mock.patch("oktaawscli.okta_awscli.OktaAuthConfig") as mock_config_cls,
+            mock.patch("oktaawscli.okta_awscli.AwsAuth") as mock_aws_auth_cls,
+            mock.patch("oktaawscli.okta_awscli.OktaAuth") as mock_okta_auth_cls,
+        ):
+            # Without --reset-factor this short-circuits get_credentials() at the
+            # cached-creds check, before any Okta/network calls. With
+            # --reset-factor that check is bypassed (see the dedicated bypass
+            # test below), so OktaAuth is also stubbed to stop cleanly right
+            # after construction -- only the flag-plumbing is exercised either way.
+            mock_config_cls.return_value.get_check_valid_creds.return_value = True
+            mock_aws_auth_cls.return_value.check_sts_token.return_value = True
+            mock_okta_auth_cls.return_value.get_assertion.side_effect = SystemExit(0)
+            result = runner.invoke(main, args)
+
+        return result, mock_config_cls
+
+    def test_reset_factor_flag_forwarded_as_true(self):
+        result, mock_config_cls = self._invoke(["--profile", "p", "--reset-factor"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertTrue(mock_config_cls.call_args.kwargs.get("reset_factor"))
+
+    def test_reset_factor_flag_defaults_to_false(self):
+        result, mock_config_cls = self._invoke(["--profile", "p"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertFalse(mock_config_cls.call_args.kwargs.get("reset_factor"))
+
+    def test_reset_factor_bypasses_cached_sts_credentials_short_circuit(self):
+        """--reset-factor must still reach OktaAuth (and thus the MFA prompt)
+        even when cached AWS STS credentials are still valid -- otherwise the
+        flag silently no-ops in the common case (most invocations happen
+        within the 1-12h STS credential lifetime)."""
+        from unittest import mock
+
+        from click.testing import CliRunner
+
+        from oktaawscli.okta_awscli import main
+
+        runner = CliRunner()
+        with (
+            mock.patch("oktaawscli.okta_awscli.OktaAuthConfig") as mock_config_cls,
+            mock.patch("oktaawscli.okta_awscli.AwsAuth") as mock_aws_auth_cls,
+            mock.patch("oktaawscli.okta_awscli.OktaAuth") as mock_okta_auth_cls,
+        ):
+            mock_config_cls.return_value.get_check_valid_creds.return_value = True
+            mock_aws_auth_cls.return_value.check_sts_token.return_value = True
+            # Let the flow proceed past OktaAuth construction without a real
+            # Okta/AWS round trip -- only whether OktaAuth was reached matters here.
+            mock_okta_auth_cls.return_value.get_assertion.side_effect = SystemExit(0)
+
+            runner.invoke(main, ["--profile", "p", "--reset-factor"])
+
+        mock_okta_auth_cls.assert_called_once()
+
+    def test_without_reset_factor_cached_sts_credentials_skip_okta_auth(self):
+        """Regression guard: the fix above must not disable the cache generally."""
+        from unittest import mock
+
+        from click.testing import CliRunner
+
+        from oktaawscli.okta_awscli import main
+
+        runner = CliRunner()
+        with (
+            mock.patch("oktaawscli.okta_awscli.OktaAuthConfig") as mock_config_cls,
+            mock.patch("oktaawscli.okta_awscli.AwsAuth") as mock_aws_auth_cls,
+            mock.patch("oktaawscli.okta_awscli.OktaAuth") as mock_okta_auth_cls,
+        ):
+            mock_config_cls.return_value.get_check_valid_creds.return_value = True
+            mock_aws_auth_cls.return_value.check_sts_token.return_value = True
+
+            runner.invoke(main, ["--profile", "p"])
+
+        mock_okta_auth_cls.assert_not_called()
 
 
 class TestOktaApiErrorHandling(_HomeIsolatedTestCase):

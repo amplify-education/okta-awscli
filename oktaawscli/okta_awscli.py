@@ -24,12 +24,13 @@ def get_credentials(
     cache,
     export,
     reset,
+    reset_factor,
     force,
     region,
     debug=False,
 ):
     """Gets credentials from Okta"""
-    okta_auth_config = OktaAuthConfig(logger, reset)
+    okta_auth_config = OktaAuthConfig(logger, reset, reset_factor=reset_factor)
 
     aws_auth = AwsAuth(
         profile=profile,
@@ -43,7 +44,7 @@ def get_credentials(
     )
 
     check_creds = okta_auth_config.get_check_valid_creds(okta_profile)
-    if not force and not export and check_creds and aws_auth.check_sts_token(profile):
+    if not force and not export and not reset_factor and check_creds and aws_auth.check_sts_token(profile):
         if write_default:
             aws_auth.copy_to_default(profile)
             print("Copying AWS profile creds to default")
@@ -156,6 +157,12 @@ Skips STS credentials validation.",
 )
 @click.option("--reset", is_flag=True, help="Resets default values in ~/.okta-aws")
 @click.option(
+    "--reset-factor",
+    is_flag=True,
+    help="Forces re-selection of the MFA factor, without resetting \
+other cached values (base URL, app, etc.) like --reset does.",
+)
+@click.option(
     "-e",
     "--export",
     is_flag=True,
@@ -202,6 +209,7 @@ def main(
     awscli_args,
     token,
     reset,
+    reset_factor,
     account,
     region,
 ):
@@ -241,6 +249,7 @@ def main(
             cache,
             export,
             reset,
+            reset_factor,
             force,
             region,
             debug=debug,
