@@ -39,6 +39,7 @@ class OktaAuth:
         self.factor_id = okta_auth_config.factor_id_for(okta_profile)
         self.legacy_factor_provider = okta_auth_config.factor_for(okta_profile)
         self.had_legacy_factor_key = okta_auth_config.factor_key_exists_for(okta_profile)
+        self.reset = okta_auth_config.reset
         self.reset_factor = okta_auth_config.reset_factor
         self.app = okta_auth_config.app_for(okta_profile)
         self.debug = debug
@@ -49,18 +50,19 @@ class OktaAuth:
 
     def primary_auth(self):
         """Performs primary auth against Okta, serializing parallel runs through a lock."""
+        force_fresh_auth = self.reset or self.reset_factor
         session_id = self.get_cached_session_id()
-        if session_id is not None and not self.reset_factor and not self.check_for_desync(session_id):
+        if session_id is not None and not force_fresh_auth and not self.check_for_desync(session_id):
             return session_id
 
         # 300s timeout accommodates interactive MFA in the holding process.
         with locked(self.token_path, timeout=INTERACTIVE_LOCK_TIMEOUT_SECONDS):
             refreshed = self.get_cached_session_id()
-            if refreshed is not None and refreshed != session_id and not self.reset_factor:
+            if refreshed is not None and refreshed != session_id and not force_fresh_auth:
                 self.logger.info("Cached Okta session was refreshed by another process; using it.")
                 return refreshed
-            # --reset-factor must always force a fresh authn flow (and thus MFA
-            # re-selection) even if a cached or peer-refreshed session is valid.
+            # --reset/--reset-factor must always force a fresh authn flow (and
+            # thus MFA re-selection) even if a cached or peer-refreshed session is valid.
             return self.get_session(self._run_authn_flow())
 
     def _run_authn_flow(self):
@@ -114,10 +116,7 @@ class OktaAuth:
             print("MFA required, but no supported factors enrolled! Exiting.")
             sys.exit(1)
 
-        if len(supported_factors) == 1:
-            index = 0
-        else:
-            index = self._resolve_factor_choice(supported_factors)
+        index = self._resolve_factor_choice(supported_factors)
         chosen = supported_factors[index]
 
         self.logger.info(
@@ -171,19 +170,26 @@ class OktaAuth:
         return index
 
     def _prompt_for_factor_choice(self, supported_factors):
-        """Interactively prompts, then persists the choice by factor id."""
-        print("Registered MFA factors:")
-        for index, label in enumerate(self._factor_labels(supported_factors)):
-            print("%d: %s" % (index + 1, label))
-        while True:
-            try:
-                factor_choice = int(input("Please select the MFA factor: ")) - 1
-            except ValueError:
-                print("Please enter a number.")
-                continue
-            if 0 <= factor_choice < len(supported_factors):
-                break
-            print("Please enter a number between 1 and %d." % len(supported_factors))
+        """Interactively prompts, then persists the choice by factor id. With
+        only one enrolled factor there's nothing to choose between, so the
+        input() prompt is skipped -- but the choice is still persisted, so a
+        stale stored preference (or a forced --reset-factor re-selection)
+        still converges instead of being silently ignored."""
+        if len(supported_factors) == 1:
+            factor_choice = 0
+        else:
+            print("Registered MFA factors:")
+            for index, label in enumerate(self._factor_labels(supported_factors)):
+                print("%d: %s" % (index + 1, label))
+            while True:
+                try:
+                    factor_choice = int(input("Please select the MFA factor: ")) - 1
+                except ValueError:
+                    print("Please enter a number.")
+                    continue
+                if 0 <= factor_choice < len(supported_factors):
+                    break
+                print("Please enter a number between 1 and %d." % len(supported_factors))
         # Only sync the legacy `factor` key for a profile that already had one
         # on disk -- otherwise a brand-new install would have the deprecated
         # key created from scratch as a side effect of this prompt. Gated on
@@ -216,7 +222,10 @@ class OktaAuth:
         elif provider == "OKTA":
             label = "Okta Verify - Push" if factor_type == "push" else "Okta Verify"
         else:
-            label = "Unsupported factor type: %s" % provider
+            # Any other provider already passed the supported_factor_types
+            # filter in verify_mfa, so it's a real, selectable factor -- just
+            # not one of the two we have a friendlier name for.
+            label = "%s (%s)" % (provider, factor_type)
 
         profile = factor.get("profile") or {}
         device_name = profile.get("name") or profile.get("deviceType")
@@ -254,6 +263,19 @@ class OktaAuth:
         print("Waiting for push verification...")
         deadline = time.monotonic() + PUSH_POLL_TIMEOUT_SECONDS
         while True:
+            # Check the deadline before starting a new request, not only after
+            # one returns -- a single poll can itself take up to
+            # MAX_OKTA_RATE_LIMIT_RETRIES * OKTA_REQUEST_TIMEOUT_SECONDS under
+            # sustained rate-limiting, which could otherwise push us well past
+            # the deadline before it's ever checked.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self.logger.error(
+                    "Still waiting on MFA push verification after %ds; giving up.",
+                    PUSH_POLL_TIMEOUT_SECONDS,
+                )
+                sys.exit(1)
+
             next_link = (resp_json.get("_links") or {}).get("next") or {}
             poll_url = next_link.get("href")
             if not poll_url:
@@ -263,6 +285,7 @@ class OktaAuth:
                 "POST",
                 poll_url,
                 "verify_single_factor_poll",
+                timeout=min(OKTA_REQUEST_TIMEOUT_SECONDS, remaining),
                 json=req_data,
             )
             if resp_json.get("status") == "SUCCESS":
@@ -275,12 +298,6 @@ class OktaAuth:
                 print("Verification was rejected")
                 sys.exit(1)
             else:
-                if time.monotonic() >= deadline:
-                    self.logger.error(
-                        "Still waiting on MFA push verification after %ds; giving up.",
-                        PUSH_POLL_TIMEOUT_SECONDS,
-                    )
-                    sys.exit(1)
                 self.logger.debug("Still waiting for push verification response...")
                 time.sleep(0.5)
 
@@ -332,7 +349,9 @@ class OktaAuth:
             sid = "sid=%s" % session_id
             headers = {"Cookie": sid}
             # https://developer.okta.com/docs/api/openapi/okta-management/management/tag/User/#tag/User/operation/getUser
-            raw_resp = requests.get(self.https_base_url + "/api/v1/users/me", headers=headers)
+            raw_resp = requests.get(
+                self.https_base_url + "/api/v1/users/me", headers=headers, timeout=OKTA_REQUEST_TIMEOUT_SECONDS
+            )
             raw_resp.raise_for_status()
             return False
         except requests.HTTPError as e:
@@ -358,7 +377,13 @@ class OktaAuth:
         attempts = MAX_OKTA_RATE_LIMIT_RETRIES if retry_on_rate_limit else 1
         for attempt in range(attempts):
             resp = requests.request(method, url, **kwargs)
-            body = resp.json()
+            try:
+                body = resp.json()
+            except ValueError:
+                self.logger.error(
+                    "Non-JSON response from Okta in %s (status %d): %s" % (context, resp.status_code, resp.text[:200])
+                )
+                sys.exit(1)
             if retry_on_rate_limit and isinstance(body, dict) and body.get("errorCode") == "E0000047":
                 delay = OKTA_RATE_LIMIT_BACKOFF_BASE_SECONDS * (2**attempt)
                 delay += random.uniform(0, delay)
@@ -452,6 +477,6 @@ class OktaAuth:
         app_name, app_link = self.get_apps(session_id)
         sid = "sid=%s" % session_id
         headers = {"Cookie": sid}
-        resp = requests.get(app_link, headers=headers)
+        resp = requests.get(app_link, headers=headers, timeout=OKTA_REQUEST_TIMEOUT_SECONDS)
         assertion = self.get_saml_assertion(resp)
         return app_name, assertion

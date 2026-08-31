@@ -44,7 +44,14 @@ def get_credentials(
     )
 
     check_creds = okta_auth_config.get_check_valid_creds(okta_profile)
-    if not force and not export and not reset_factor and check_creds and aws_auth.check_sts_token(profile):
+    if (
+        not force
+        and not export
+        and not reset
+        and not reset_factor
+        and check_creds
+        and aws_auth.check_sts_token(profile)
+    ):
         if write_default:
             aws_auth.copy_to_default(profile)
             print("Copying AWS profile creds to default")

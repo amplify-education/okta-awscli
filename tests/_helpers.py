@@ -43,6 +43,7 @@ class HomeIsolatedTestCase(unittest.TestCase):
         auth.factor_id = None
         auth.legacy_factor_provider = None
         auth.had_legacy_factor_key = False
+        auth.reset = False
         auth.reset_factor = False
         auth.verbose = False
         auth.debug = False

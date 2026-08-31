@@ -7,7 +7,11 @@ from contextlib import contextmanager
 from filelock import FileLock
 
 LOCK_TIMEOUT_SECONDS = 60
-INTERACTIVE_LOCK_TIMEOUT_SECONDS = 300
+# Comfortably larger than the push-poll deadline (300s) plus worst-case Okta
+# rate-limit retry overhead on a single poll request (5 retries x 30s
+# timeout = 150s) -- otherwise a legitimately slow-but-successful auth flow
+# can time out a peer process waiting on this same lock before we're done.
+INTERACTIVE_LOCK_TIMEOUT_SECONDS = 600
 
 
 def locked(path, timeout=LOCK_TIMEOUT_SECONDS):

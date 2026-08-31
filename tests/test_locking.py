@@ -43,6 +43,27 @@ def _child_write_sts(home_dir, profile_name):
     )
 
 
+class TestInteractiveLockTimeoutMargin(unittest.TestCase):
+    """INTERACTIVE_LOCK_TIMEOUT_SECONDS must comfortably exceed the push-poll
+    deadline plus worst-case rate-limit retry overhead -- otherwise a
+    legitimately slow-but-successful auth flow can cause a waiting peer
+    process's lock acquisition to time out before we're actually done."""
+
+    def test_lock_timeout_exceeds_poll_deadline_plus_retry_overhead(self):
+        from oktaawscli._locking import INTERACTIVE_LOCK_TIMEOUT_SECONDS
+        from oktaawscli.okta_auth import (
+            MAX_OKTA_RATE_LIMIT_RETRIES,
+            OKTA_REQUEST_TIMEOUT_SECONDS,
+            PUSH_POLL_TIMEOUT_SECONDS,
+        )
+
+        worst_case_single_poll_overhead = MAX_OKTA_RATE_LIMIT_RETRIES * OKTA_REQUEST_TIMEOUT_SECONDS
+        self.assertGreater(
+            INTERACTIVE_LOCK_TIMEOUT_SECONDS,
+            PUSH_POLL_TIMEOUT_SECONDS + worst_case_single_poll_overhead,
+        )
+
+
 class TestLockingTimeout(unittest.TestCase):
     """`locked()` raises filelock.Timeout when another process holds the lock."""
 
@@ -478,6 +499,30 @@ class TestCliResetFactorFlag(unittest.TestCase):
             runner.invoke(main, ["--profile", "p"])
 
         mock_okta_auth_cls.assert_not_called()
+
+    def test_reset_also_bypasses_cached_sts_credentials_short_circuit(self):
+        """--reset must reach OktaAuth too -- otherwise it re-asks for
+        base-url/username/app but silently keeps the old MFA factor whenever
+        AWS STS credentials are still cached."""
+        from unittest import mock
+
+        from click.testing import CliRunner
+
+        from oktaawscli.okta_awscli import main
+
+        runner = CliRunner()
+        with (
+            mock.patch("oktaawscli.okta_awscli.OktaAuthConfig") as mock_config_cls,
+            mock.patch("oktaawscli.okta_awscli.AwsAuth") as mock_aws_auth_cls,
+            mock.patch("oktaawscli.okta_awscli.OktaAuth") as mock_okta_auth_cls,
+        ):
+            mock_config_cls.return_value.get_check_valid_creds.return_value = True
+            mock_aws_auth_cls.return_value.check_sts_token.return_value = True
+            mock_okta_auth_cls.return_value.get_assertion.side_effect = SystemExit(0)
+
+            runner.invoke(main, ["--profile", "p", "--reset"])
+
+        mock_okta_auth_cls.assert_called_once()
 
 
 class TestOktaApiErrorHandling(_HomeIsolatedTestCase):

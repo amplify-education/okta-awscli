@@ -104,6 +104,26 @@ class TestSaveChosenFactorIdForProfile(HomeIsolatedTestCase):
         self.assertEqual(parser.get("default", "factor-id"), "opfNewPush123")
         self.assertEqual(parser.get("default", "factor"), "OKTA")
 
+    def test_provider_kwarg_writes_both_keys_in_one_locked_transaction(self):
+        """Both keys must be written under a single lock acquisition -- two
+        separate locked() calls leave a window where a concurrent writer's
+        save can interleave, pairing one process's factor-id with another
+        process's provider."""
+        from unittest import mock
+
+        from oktaawscli import _locking as locking_module
+        from oktaawscli.okta_auth_config import OktaAuthConfig
+
+        with open(self.config_path, "w") as f:
+            f.write("[default]\nfactor = GOOGLE\n")
+
+        config = OktaAuthConfig(logger=logging.getLogger("test"), reset=False)
+
+        with mock.patch("oktaawscli.okta_auth_config.locked", wraps=locking_module.locked) as mock_locked:
+            config.save_chosen_factor_id_for_profile("default", "opfNewPush123", provider="OKTA")
+
+        mock_locked.assert_called_once_with(self.config_path)
+
     def test_omitting_provider_leaves_legacy_factor_key_untouched(self):
         with open(self.config_path, "w") as f:
             f.write("[default]\nfactor = GOOGLE\n")

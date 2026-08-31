@@ -154,14 +154,14 @@ class OktaAuthConfig:
     def save_chosen_factor_id_for_profile(self, okta_profile, factor_id, provider=None):
         """Saves the chosen MFA factor id to config. When provider is given,
         also updates the legacy `factor` key so older okta-awscli versions
-        reading the same config file see the same choice."""
-        self._save_config_value(
-            section=okta_profile,
-            key="factor-id",
-            value=factor_id,
-        )
+        reading the same config file see the same choice. Both keys are
+        written under a single locked transaction so a concurrent save from
+        another process can't interleave and pair one process's factor-id
+        with another's provider."""
+        values = {"factor-id": factor_id}
         if provider is not None:
-            self.save_chosen_factor_for_profile(okta_profile, provider)
+            values["factor"] = provider
+        self._save_config_values(okta_profile, values)
 
     def save_chosen_app_for_profile(self, okta_profile, app):
         """Saves app to config"""
@@ -172,6 +172,11 @@ class OktaAuthConfig:
         )
 
     def _save_config_value(self, section, key, value):
+        self._save_config_values(section, {key: value})
+
+    def _save_config_values(self, section, values):
+        """Writes multiple key/value pairs in a single locked transaction, so
+        a concurrent save from another process can't interleave between them."""
         with locked(self.config_path):
             # Re-read inside the lock so concurrent saves merge instead of clobbering.
             fresh = ConfigParser(default_section=DEFAULT_SECTION)
@@ -179,7 +184,8 @@ class OktaAuthConfig:
 
             if section != DEFAULT_SECTION and not fresh.has_section(section):
                 fresh.add_section(section)
-            fresh.set(section, key, value)
+            for key, value in values.items():
+                fresh.set(section, key, value)
 
             with atomic_write(self.config_path) as configfile:
                 fresh.write(configfile)
