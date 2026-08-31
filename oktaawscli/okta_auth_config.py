@@ -18,9 +18,10 @@ DEFAULT_SECTION = "default"
 class OktaAuthConfig:
     """Config helper class"""
 
-    def __init__(self, logger, reset):
+    def __init__(self, logger, reset, reset_factor=False):
         self.logger = logger
         self.reset = reset
+        self.reset_factor = reset_factor
         self.config_path = os.path.expanduser("~") + "/.okta-aws"
         self._value = ConfigParser(default_section=DEFAULT_SECTION)
         self._value.read(self.config_path)
@@ -63,13 +64,31 @@ class OktaAuthConfig:
         return password
 
     def factor_for(self, okta_profile):
-        """Gets factor from config"""
-        if self.reset:
+        """Gets legacy provider-keyed factor choice from config. Superseded by
+        factor_id_for; kept only so callers can migrate a pre-existing value."""
+        if self.reset or self.reset_factor:
             return None
 
         factor = self._value.get(okta_profile, "factor", fallback=None)
         self.logger.debug("Setting MFA factor to %s" % factor)
         return factor
+
+    def factor_key_exists_for(self, okta_profile):
+        """Raw, reset-independent check for whether a legacy `factor` value is
+        on disk. Unlike factor_for, this is NOT suppressed by --reset/
+        --reset-factor -- callers use it to decide whether to keep an
+        existing legacy key in sync, which must still happen during a forced
+        re-prompt, not just on an unforced one."""
+        return self._value.get(okta_profile, "factor", fallback=None) is not None
+
+    def factor_id_for(self, okta_profile):
+        """Gets the previously-selected MFA factor id from config"""
+        if self.reset or self.reset_factor:
+            return None
+
+        factor_id = self._value.get(okta_profile, "factor-id", fallback=None)
+        self.logger.debug("Setting MFA factor id to %s" % factor_id)
+        return factor_id
 
     def app_for(self, okta_profile):
         """Gets app from config"""
@@ -132,6 +151,18 @@ class OktaAuthConfig:
             value=factor,
         )
 
+    def save_chosen_factor_id_for_profile(self, okta_profile, factor_id, provider=None):
+        """Saves the chosen MFA factor id to config. When provider is given,
+        also updates the legacy `factor` key so older okta-awscli versions
+        reading the same config file see the same choice. Both keys are
+        written under a single locked transaction so a concurrent save from
+        another process can't interleave and pair one process's factor-id
+        with another's provider."""
+        values = {"factor-id": factor_id}
+        if provider is not None:
+            values["factor"] = provider
+        self._save_config_values(okta_profile, values)
+
     def save_chosen_app_for_profile(self, okta_profile, app):
         """Saves app to config"""
         self._save_config_value(
@@ -141,6 +172,11 @@ class OktaAuthConfig:
         )
 
     def _save_config_value(self, section, key, value):
+        self._save_config_values(section, {key: value})
+
+    def _save_config_values(self, section, values):
+        """Writes multiple key/value pairs in a single locked transaction, so
+        a concurrent save from another process can't interleave between them."""
         with locked(self.config_path):
             # Re-read inside the lock so concurrent saves merge instead of clobbering.
             fresh = ConfigParser(default_section=DEFAULT_SECTION)
@@ -148,7 +184,8 @@ class OktaAuthConfig:
 
             if section != DEFAULT_SECTION and not fresh.has_section(section):
                 fresh.add_section(section)
-            fresh.set(section, key, value)
+            for key, value in values.items():
+                fresh.set(section, key, value)
 
             with atomic_write(self.config_path) as configfile:
                 fresh.write(configfile)

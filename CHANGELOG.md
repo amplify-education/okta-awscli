@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.17] 2026-08-28
+
+### Fixed
+
+- MFA factor selection now persists the chosen Okta factor's `id` (new `factor-id` key in `~/.okta-aws`) instead of just its `provider`. Previously, two enrolled factors of the same provider (e.g. two "Okta Verify - Push" entries after enrolling a new device) were indistinguishable once saved, so the tool could silently keep using a de-enrolled device's push factor. A stored `factor-id` no longer enrolled now falls back to a fresh prompt instead of crashing.
+- The interactive MFA prompt now shows each push factor's device name (e.g. `Okta Verify - Push (Pixel 11 Pro XL)`) when Okta provides one, and appends a short factor-id suffix to disambiguate any labels that would otherwise still collide.
+- `verify_single_factor`'s push-verification polling now goes through the same rate-limited, timeout-bounded request helper as other Okta API calls, so a malformed or rate-limited poll response can no longer crash the CLI with a `KeyError`.
+- Selecting the sole remaining MFA factor no longer bypasses preference resolution: a stale `factor-id`/legacy `factor` value, or a `--reset-factor` re-selection, is now corrected even when there's only one enrolled factor to pick from (previously silently ignored, since there's nothing to prompt for).
+- `--reset` now bypasses the cached Okta session and cached AWS STS credentials the same way `--reset-factor` does, so it actually reaches the MFA prompt instead of re-asking for base URL/username/app while silently keeping the old factor.
+- A non-JSON reply from Okta (an HTML error page from a load balancer, proxy, or captive portal) now exits with a readable message instead of crashing with a raw `JSONDecodeError` traceback.
+- A working MFA factor from a provider other than Okta or Google (e.g. a custom software token) is no longer mislabeled "Unsupported" in the selection prompt.
+- The push-approval poll loop now checks its deadline before starting a new request (not only after one returns) and bounds each request's timeout to the remaining budget, so a slow or rate-limited poll can't silently overrun the deadline; the cross-process auth lock's timeout is now comfortably larger than the poll deadline plus its worst-case retry overhead.
+- The two `requests.get` calls outside the shared Okta request helper (session-desync check, SAML assertion fetch) now carry the same timeout as every other Okta network call.
+
+### Added
+
+- `--reset-factor` CLI flag: forces re-selection of the MFA factor without resetting other cached `~/.okta-aws` values (base URL, app, etc.) like `--reset` does. Useful right after enrolling a new MFA device. Bypasses both a still-valid cached `~/.okta-token` Okta session (and a concurrently-refreshed one) and a still-valid cached AWS STS credentials file, so the flag reliably reaches the MFA prompt instead of silently no-oping whenever either cache is warm.
+
+### Notes
+
+Existing `~/.okta-aws` files with only the legacy `factor` (provider) key keep working: on the next run, that value is silently migrated to `factor-id` if it still resolves to exactly one enrolled factor, otherwise the user is prompted once to disambiguate. Once a profile has a legacy `factor` value, it stays in sync with every future selection -- written atomically alongside `factor-id` in a single locked transaction so a concurrent process can't observe one updated without the other -- including under `--reset`/`--reset-factor`, where the sync must not be skipped just because those flags also suppress the legacy value for migration purposes -- so an older okta-awscli version, or a parallel install, reading the same config file sees a consistent choice. A profile that never had one is not retroactively given one.
+
 ## [0.4.16] 2026-05-22
 
 ### Added
