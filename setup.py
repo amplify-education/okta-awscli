@@ -2,6 +2,12 @@ from setuptools import find_packages, setup
 
 from oktaawscli.version import __version__
 
+
+def get_requirements():
+    with open("requirements.txt") as reqfile:
+        return [line for line in reqfile.read().splitlines() if line and not line.startswith(("#", "-"))]
+
+
 setup(
     name="amplify-okta-awscli",
     version=__version__,
@@ -16,12 +22,5 @@ setup(
             "okta-awscli=oktaawscli.okta_awscli:main",
         ],
     },
-    install_requires=[
-        "requests",
-        "click",
-        "bs4",
-        "boto3",
-        "ConfigParser",
-        "filelock",
-    ],
+    install_requires=get_requirements(),
 )
