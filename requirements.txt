@@ -1,6 +1,6 @@
-requests
-click
-bs4
-boto3
-ConfigParser
-filelock
+requests~=2.34
+click~=8.5
+bs4~=0.0.2
+boto3~=1.44
+ConfigParser~=7.3
+filelock~=4.2
